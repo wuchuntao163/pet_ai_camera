@@ -1,0 +1,42 @@
+name: pet_ai_camera
+description: "宠物AI相机 - 智能宠物拍照应用"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  audioplayers: ^6.4.0
+  crypto: ^3.0.7
+  dio: ^5.9.2
+  encrypt: ^5.0.3
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.3.2
+  go_router: ^14.8.1
+  image: ^4.8.0
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  permission_handler: ^12.0.3
+  photo_manager: ^3.9.0
+  record: ^6.2.1
+  share_plus: ^10.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/images/logo.png
+  remove_alpha_ios: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/logo.png
+    - assets/images/camera/

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>录制自定义音效 - 宠物AI相机</title>
+  <link rel="stylesheet" href="css/common.css">
+  <style>
+    body { background: #333; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <!-- 背景：音效库空状态 -->
+    <div class="sheet sheet--sound" style="position: absolute; bottom: 0; height: 88%; opacity: 0.4;">
+      <div class="sheet-header">
+        <div class="sheet-header__title">
+          <span style="color: var(--note-purple); font-size: 16px;">♪</span>
+          <span>宠物音效库</span>
+        </div>
+        <button class="close-btn"><img src="../assets/images/camera/image_19.png" alt=""></button>
+      </div>
+      <div class="tab-bar">
+        <div class="tab tab--pink"><span>🎤</span> 我的录制</div>
+        <div class="tab"><span>🐱</span> 萌宠猫猫</div>
+      </div>
+      <button class="btn-record-new" style="opacity: 0.6;">
+        <span class="btn-record-new__icon"><img src="../assets/images/camera/image_25.png" alt=""></span>
+        录制新音效
+      </button>
+      <div class="empty-state">
+        <img src="../assets/images/camera/image_26.png" alt="">
+        <p class="empty-state__title">还没有录制音效</p>
+        <p class="empty-state__hint">点击上方按钮开始录制</p>
+      </div>
+    </div>
+
+    <!-- 对话框遮罩 -->
+    <div class="overlay">
+      <div class="dialog">
+        <div class="dialog__title">
+          <img src="../assets/images/camera/image_32.png" alt="">
+          录制自定义音效
+        </div>
+        <input class="dialog__input" type="text" placeholder="输入音效名称（如：叫咪咪）">
+        <p class="dialog__hint">点击下方按钮开始录制</p>
+        <div class="dialog__actions">
+          <button class="dialog__btn dialog__btn--start">
+            <img src="../assets/images/camera/image_33.png" alt="">
+            开始录制
+          </button>
+          <button class="dialog__btn dialog__btn--cancel">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

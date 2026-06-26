@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设置 - 宠物AI相机</title>
+  <link rel="stylesheet" href="css/common.css">
+  <style>
+    body { background: #333; display: flex; align-items: flex-end; justify-content: center; min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="sheet sheet--settings">
+      <!-- 标题栏 -->
+      <div class="sheet-header">
+        <div class="sheet-header__title">
+          <img src="../assets/images/camera/image_18.png" alt="">
+          <span>设置</span>
+        </div>
+        <button class="close-btn" aria-label="关闭">
+          <img src="../assets/images/camera/image_19.png" alt="">
+        </button>
+      </div>
+
+      <div class="sheet-body">
+        <!-- 音效音量 -->
+        <div class="setting-card">
+          <div class="setting-card__row">
+            <img class="setting-card__icon" src="../assets/images/camera/image_12.png" alt="">
+            <span class="setting-card__label">音效音量</span>
+            <span class="setting-card__value">80%</span>
+          </div>
+          <div class="slider-wrap">
+            <input type="range" class="slider" min="0" max="100" value="80">
+          </div>
+        </div>
+
+        <!-- 快门声音 -->
+        <div class="setting-card">
+          <div class="setting-card__row">
+            <img class="setting-card__icon" src="../assets/images/camera/image_13.png" alt="">
+            <div>
+              <div class="setting-card__label">快门声音</div>
+              <div class="setting-card__desc">拍摄时播放快门音效</div>
+            </div>
+            <div class="toggle toggle--on"><span class="toggle__knob"></span></div>
+          </div>
+        </div>
+
+        <!-- 静音拍摄 -->
+        <div class="setting-card">
+          <div class="setting-card__row">
+            <img class="setting-card__icon" src="../assets/images/camera/image_14.png" alt="">
+            <div>
+              <div class="setting-card__label">静音拍摄</div>
+              <div class="setting-card__desc">避免快门声惊扰宠物</div>
+            </div>
+            <div class="toggle"><span class="toggle__knob"></span></div>
+          </div>
+        </div>
+
+        <!-- 连拍模式 -->
+        <div class="setting-card">
+          <div class="setting-card__row">
+            <img class="setting-card__icon" src="../assets/images/camera/image_15.png" alt="">
+            <span class="setting-card__label">连拍模式</span>
+          </div>
+          <div class="segment">
+            <span class="segment__item segment__item--active">单拍</span>
+            <span class="segment__item">3张</span>
+            <span class="segment__item">5张</span>
+            <span class="segment__item">10张</span>
+          </div>
+        </div>
+
+        <!-- 延时拍摄 -->
+        <div class="setting-card">
+          <div class="setting-card__row">
+            <img class="setting-card__icon" src="../assets/images/camera/image_16.png" alt="">
+            <span class="setting-card__label">延时拍摄</span>
+          </div>
+          <div class="segment">
+            <span class="segment__item segment__item--active">关闭</span>
+            <span class="segment__item">3秒</span>
+            <span class="segment__item">5秒</span>
+            <span class="segment__item">10秒</span>
+          </div>
+        </div>
+
+        <!-- 宠物音效 -->
+        <div class="setting-card">
+          <div class="sound-grid">
+            <div class="sound-grid__item">
+              <div class="sound-grid__emoji">🐱</div>
+              <span class="sound-grid__name">可爱小猫</span>
+            </div>
+            <div class="sound-grid__item">
+              <div class="sound-grid__emoji">😻</div>
+              <span class="sound-grid__name">咕噜猫</span>
+            </div>
+            <div class="sound-grid__item">
+              <div class="sound-grid__emoji">🐶</div>
+              <span class="sound-grid__name">奶狗叫声</span>
+            </div>
+            <div class="sound-grid__item">
+              <div class="sound-grid__emoji">🐕</div>
+              <span class="sound-grid__name">狗狗饿了</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部录制 -->
+      <div class="sheet-footer">
+        <div class="sheet-footer__info">
+          <div class="sheet-footer__title">
+            自定义录制音效
+            <span class="badge-free">免费</span>
+          </div>
+          <div class="sheet-footer__desc">自定义录制音效，其他很多音效等</div>
+        </div>
+        <button class="btn-record">
+          <img src="../assets/images/camera/image_17.png" alt="">
+          开始录制
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

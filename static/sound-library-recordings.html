@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>音效库 - 我的录制</title>
+  <link rel="stylesheet" href="css/common.css">
+  <style>
+    body { background: #333; display: flex; align-items: flex-end; justify-content: center; min-height: 100vh; }
+    .sheet--sound { display: flex; flex-direction: column; height: 88%; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="sheet sheet--sound">
+      <!-- 标题栏 -->
+      <div class="sheet-header">
+        <div class="sheet-header__title">
+          <span style="color: var(--note-purple); font-size: 16px;">♪</span>
+          <span style="color: var(--sound-title);">宠物音效库</span>
+        </div>
+        <button class="close-btn" aria-label="关闭">
+          <img src="../assets/images/camera/image_19.png" alt="">
+        </button>
+      </div>
+
+      <!-- 标签栏 -->
+      <div class="tab-bar">
+        <div class="tab tab--pink">
+          <span style="font-size: 12px;">🎤</span>
+          我的录制
+        </div>
+        <div class="tab">
+          <span style="font-size: 12px;">🐱</span>
+          萌宠猫猫
+        </div>
+        <div class="tab">
+          <span style="font-size: 12px;">🐶</span>
+          萌宠狗狗
+        </div>
+      </div>
+
+      <!-- 录制按钮 -->
+      <button class="btn-record-new">
+        <span class="btn-record-new__icon">
+          <img src="../assets/images/camera/image_25.png" alt="">
+        </span>
+        录制新音效
+      </button>
+
+      <!-- 空状态 -->
+      <div class="empty-state">
+        <img src="../assets/images/camera/image_26.png" alt="">
+        <p class="empty-state__title">还没有录制音效</p>
+        <p class="empty-state__hint">点击上方按钮开始录制</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

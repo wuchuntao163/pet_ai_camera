@@ -1,0 +1,133 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
+import '../models/camera_config.dart';
+
+class NativeCameraInitResult {
+  final double baselineOneX;
+  final double minZoom;
+  final double maxZoom;
+  final double previewAspectRatio;
+  final bool isBackCamera;
+
+  const NativeCameraInitResult({
+    required this.baselineOneX,
+    required this.minZoom,
+    required this.maxZoom,
+    required this.previewAspectRatio,
+    required this.isBackCamera,
+  });
+
+  factory NativeCameraInitResult.fromMap(Map<dynamic, dynamic> map) {
+    return NativeCameraInitResult(
+      baselineOneX: (map['baselineOneX'] as num).toDouble(),
+      minZoom: (map['minZoom'] as num).toDouble(),
+      maxZoom: (map['maxZoom'] as num).toDouble(),
+      previewAspectRatio: (map['previewAspectRatio'] as num).toDouble(),
+      isBackCamera: map['isBackCamera'] as bool? ?? true,
+    );
+  }
+}
+
+class NativeCaptureResult {
+  final String path;
+  final int? captureDurationMs;
+  final bool directOutput;
+
+  const NativeCaptureResult({
+    required this.path,
+    this.captureDurationMs,
+    this.directOutput = false,
+  });
+
+  factory NativeCaptureResult.fromMap(Map<dynamic, dynamic> map) {
+    return NativeCaptureResult(
+      path: map['path'] as String,
+      captureDurationMs: (map['captureDurationMs'] as num?)?.toInt(),
+      directOutput: map['directOutput'] as bool? ?? false,
+    );
+  }
+}
+
+/// 原生相机 MethodChannel（Android CameraX / iOS AVFoundation）
+class NativeCameraChannel {
+  static const _channel = MethodChannel('com.example.pet_ai_camera/native_camera');
+
+  static Future<NativeCameraInitResult> initialize() async {
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      throw UnsupportedError('Native camera only supports Android and iOS');
+    }
+    final map = await _channel.invokeMethod<Map<dynamic, dynamic>>('initialize');
+    if (map == null) throw StateError('Native camera initialize returned null');
+    return NativeCameraInitResult.fromMap(map);
+  }
+
+  static Future<void> dispose() async {
+    try {
+      await _channel.invokeMethod<void>('dispose');
+    } catch (e) {
+      debugPrint('NativeCameraChannel.dispose: $e');
+    }
+  }
+
+  static Future<NativeCameraInitResult> switchCamera() async {
+    final map =
+        await _channel.invokeMethod<Map<dynamic, dynamic>>('switchCamera');
+    if (map == null) throw StateError('switchCamera returned null');
+    return NativeCameraInitResult.fromMap(map);
+  }
+
+  static Future<void> setZoom(double zoom) async {
+    await _channel.invokeMethod<void>('setZoom', {'zoom': zoom});
+  }
+
+  static Future<void> setFlash(FlashToolbarState state) async {
+    final mode = switch (state) {
+      FlashToolbarState.off => 'off',
+      FlashToolbarState.on => 'on',
+      FlashToolbarState.auto => 'auto',
+    };
+    await _channel.invokeMethod<void>('setFlash', {'mode': mode});
+  }
+
+  static Future<NativeCaptureResult> takePicture({
+    Map<String, dynamic>? crop,
+  }) async {
+    final map = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'takePicture',
+      crop != null ? {'crop': crop} : null,
+    );
+    if (map == null) throw StateError('takePicture returned null');
+    return NativeCaptureResult.fromMap(map);
+  }
+
+  static Future<NativeCameraInitResult> setPreviewMode({
+    required bool contain,
+    double? viewportAspect,
+  }) async {
+    final map = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'setPreviewMode',
+      {
+        'contain': contain,
+        'viewportAspect': ?viewportAspect,
+      },
+    );
+    if (map == null) throw StateError('setPreviewMode returned null');
+    return NativeCameraInitResult.fromMap(map);
+  }
+
+  static Future<void> pause() async {
+    try {
+      await _channel.invokeMethod<void>('pause');
+    } catch (_) {}
+  }
+
+  static Future<NativeCameraInitResult> resume() async {
+    final map = await _channel.invokeMethod<Map<dynamic, dynamic>>('resume');
+    if (map == null) throw StateError('Native camera resume returned null');
+    return NativeCameraInitResult.fromMap(map);
+  }
+
+}

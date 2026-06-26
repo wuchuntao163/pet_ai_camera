@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>相机主界面 - 宠物AI相机</title>
+  <link rel="stylesheet" href="css/common.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="camera">
+      <div class="camera-preview">
+        <!-- 顶部工具栏 -->
+        <div class="camera-top">
+          <button class="circle-btn" aria-label="关闭">
+            <img src="../assets/images/camera/image_5.png" alt="">
+          </button>
+          <div class="top-tools">
+            <button class="pill-btn">9:16</button>
+            <button class="circle-btn"><img src="../assets/images/camera/image_6.png" alt=""></button>
+            <button class="circle-btn"><img src="../assets/images/camera/image_8.png" alt=""></button>
+            <button class="circle-btn"><img src="../assets/images/camera/image_9.png" alt=""></button>
+            <button class="circle-btn"><img src="../assets/images/camera/image_10.png" alt=""></button>
+          </div>
+        </div>
+
+        <!-- 变焦控制 -->
+        <div class="zoom-bar">
+          <span class="zoom-bar__item zoom-bar__item--active">1X</span>
+          <span class="zoom-bar__item">2X</span>
+          <span class="zoom-bar__item">5X</span>
+        </div>
+
+        <!-- 右侧宠物菜单 -->
+        <div class="pet-menu">
+          <button class="pet-menu__item"><span>🐱</span></button>
+          <button class="pet-menu__item"><span>😸</span></button>
+          <button class="pet-menu__item pet-menu__item--active"><span>🐶</span></button>
+          <button class="pet-menu__item"><span>🦴</span></button>
+          <button class="pet-menu__item pet-menu__arrow">
+            <img src="../assets/images/camera/image_2.png" alt="">
+          </button>
+        </div>
+      </div>
+
+      <!-- 底部控制栏 -->
+      <div class="camera-bottom">
+        <div class="mode-switch">
+          <span class="mode-switch__item mode-switch__item--active">Photo</span>
+          <span class="mode-switch__item">Video</span>
+        </div>
+        <div class="capture-row">
+          <div class="gallery-thumb">
+            <img src="https://images.unsplash.com/photo-1552053831-71594a27632d?w=80&h=80&fit=crop" alt="">
+          </div>
+          <button class="shutter-btn" aria-label="拍照">
+            <span class="shutter-btn__inner"></span>
+          </button>
+          <button class="flip-btn" aria-label="切换摄像头">
+            <img src="../assets/images/camera/image_4.png" alt="">
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

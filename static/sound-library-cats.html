@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>音效库 - 萌宠猫猫</title>
+  <link rel="stylesheet" href="css/common.css">
+  <style>
+    body { background: #333; display: flex; align-items: flex-end; justify-content: center; min-height: 100vh; }
+    .sheet--sound { display: flex; flex-direction: column; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="sheet sheet--sound">
+      <!-- 标题栏 -->
+      <div class="sheet-header">
+        <div class="sheet-header__title">
+          <span style="color: var(--note-purple); font-size: 16px;">♪</span>
+          <span style="color: var(--sound-title);">宠物音效库</span>
+        </div>
+        <button class="close-btn" aria-label="关闭">
+          <img src="../assets/images/camera/image_19.png" alt="">
+        </button>
+      </div>
+
+      <!-- 标签栏 -->
+      <div class="tab-bar">
+        <div class="tab">
+          <span style="font-size: 12px;">🎤</span>
+          我的录制
+        </div>
+        <div class="tab tab--orange">
+          <span style="font-size: 12px;">🐱</span>
+          萌宠猫猫
+        </div>
+        <div class="tab">
+          <span style="font-size: 12px;">🐶</span>
+          萌宠狗狗
+        </div>
+      </div>
+
+      <!-- 音效列表 -->
+      <div class="sound-list">
+        <div class="sound-item">
+          <span class="sound-item__emoji">😺</span>
+          <span class="sound-item__name">可爱小猫</span>
+        </div>
+        <div class="sound-item">
+          <span class="sound-item__emoji">😸</span>
+          <span class="sound-item__name">咕噜猫</span>
+        </div>
+        <div class="sound-item">
+          <span class="sound-item__emoji">😾</span>
+          <span class="sound-item__name">生气小猫</span>
+        </div>
+        <div class="sound-item">
+          <span class="sound-item__emoji">😻</span>
+          <span class="sound-item__name">小奶猫</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
