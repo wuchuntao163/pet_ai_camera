@@ -38,8 +38,7 @@ class PhotoCropService {
 
     try {
       return compute(_runCropJob, params);
-    } catch (e) {
-      debugPrint('PhotoCropService: crop failed: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -96,8 +95,7 @@ String? _cropNativeSensorJob(_CropJobParams params) {
       img.encodeJpg(image, quality: 92),
     );
     return params.sourcePath;
-  } catch (e) {
-    debugPrint('PhotoCropService native sensor: $e');
+  } catch (_) {
     return null;
   }
 }
@@ -161,8 +159,7 @@ String? _cropJob(_CropJobParams params) {
       img.encodeJpg(output, quality: 85),
     );
     return params.sourcePath;
-  } catch (e) {
-    debugPrint('PhotoCropService crop job: $e');
+  } catch (_) {
     return null;
   }
 }

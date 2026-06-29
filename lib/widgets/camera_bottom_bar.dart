@@ -119,7 +119,7 @@ class CameraBottomBar extends StatelessWidget {
   }
 }
 
-/// 左下角相册：刚拍完用内存缩略图，其余时候用本地缓存/网络图
+/// 左下角相册：Android 直接本地缩略图；iOS 刚拍完可用内存缩略图
 class _GalleryButton extends StatelessWidget {
   final String? localPath;
   final String? remoteUrl;
@@ -147,6 +147,73 @@ class _GalleryButton extends StatelessWidget {
     final cacheSize =
         (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(48, 96);
 
+    if (Platform.isIOS) {
+      return _buildIosThumb(size, cacheSize);
+    }
+    return _buildAndroidThumb(size, cacheSize);
+  }
+
+  Widget _buildAndroidThumb(double size, int cacheSize) {
+    final showLocal = !preferCloud && localPath != null && localPath!.isNotEmpty;
+    final showRemote = preferCloud && remoteUrl != null && remoteUrl!.isNotEmpty;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: AppColors.translucentBtn,
+          borderRadius: BorderRadius.circular(_thumbRadius),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (showLocal)
+              Image.file(
+                File(localPath!),
+                key: ValueKey('local-$localPath-$revision'),
+                width: size,
+                height: size,
+                cacheWidth: cacheSize,
+                cacheHeight: cacheSize,
+                gaplessPlayback: true,
+                fit: BoxFit.cover,
+              )
+            else if (showRemote)
+              Image.network(
+                remoteUrl!,
+                key: ValueKey('remote-$remoteUrl-$revision'),
+                width: size,
+                height: size,
+                cacheWidth: cacheSize,
+                cacheHeight: cacheSize,
+                gaplessPlayback: true,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => _placeholder(),
+              )
+            else if (localPath != null && localPath!.isNotEmpty)
+              Image.file(
+                File(localPath!),
+                key: ValueKey('local-fallback-$localPath-$revision'),
+                width: size,
+                height: size,
+                cacheWidth: cacheSize,
+                cacheHeight: cacheSize,
+                gaplessPlayback: true,
+                fit: BoxFit.cover,
+              )
+            else
+              _placeholder(),
+            if (isLoading) _loadingOverlay(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIosThumb(double size, int cacheSize) {
     final showMemory = thumbBytes != null && thumbBytes!.isNotEmpty;
     final showLocal =
         !preferCloud && !showMemory && localPath != null && localPath!.isNotEmpty;

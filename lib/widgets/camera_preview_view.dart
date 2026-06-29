@@ -5,17 +5,36 @@ import '../constants/app_sizes.dart';
 import '../native_camera/native_camera_preview.dart';
 import '../utils/preview_frame_geometry.dart';
 
-/// 相机预览（PlatformView 常驻全屏，遮罩用叠层实现，避免切换比例时销毁原生视图）
+/// 相机预览
+///
+/// - iOS：PlatformView 常驻全屏，遮罩用叠层（避免切换比例时销毁原生视图）
+/// - Android：按传感器比例 contain/铺满定位预览（3:4 上下留黑边）
 class CameraPreviewView extends StatelessWidget {
-  /// 非 null 时用遮罩条标出取景框（1:1 / 4:3 / 16:9）
+  /// iOS 遮罩模式：非 null 时用黑条标出取景框（1:1 / 4:3 / 16:9）
   final double? maskRatio;
 
-  /// 垂直位置：0=顶，0.5=居中，1=底（遮罩模式）
+  /// Android 定位模式：传感器流宽高比（宽/高）
+  final double? previewAspectRatio;
+
+  /// Android：true = contain 完整显示传感器（3:4 可有黑边）
+  final bool fitContain;
+
+  /// Android：true = 全屏预览（9:16 原生 ViewPort 铺满）
+  final bool fullScreen;
+
+  /// true = Android 定位布局；false = iOS 全屏叠层布局
+  final bool usePositionedLayout;
+
+  /// 垂直位置：0=顶，0.5=居中，1=底
   final double verticalAlignY;
 
   const CameraPreviewView({
     super.key,
     this.maskRatio,
+    this.previewAspectRatio,
+    this.fitContain = false,
+    this.fullScreen = false,
+    this.usePositionedLayout = false,
     this.verticalAlignY = AppSizes.previewVerticalAlignY,
   });
 
@@ -23,6 +42,13 @@ class CameraPreviewView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (usePositionedLayout) {
+      return _buildPositionedLayout();
+    }
+    return _buildOverlayLayout();
+  }
+
+  Widget _buildOverlayLayout() {
     return ColoredBox(
       color: AppColors.bottomBarBg,
       child: Stack(
@@ -38,6 +64,46 @@ class CameraPreviewView extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPositionedLayout() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewW = constraints.maxWidth;
+        final viewH = constraints.maxHeight;
+
+        if (fullScreen) {
+          return const SizedBox.expand(
+            child: NativeCameraPreview(),
+          );
+        }
+
+        final aspect = previewAspectRatio ?? (3 / 4);
+        final layout = computePreviewScreenLayout(
+          screenW: viewW,
+          screenH: viewH,
+          previewAspect: aspect,
+          fitContain: fitContain,
+          fullScreenPreview: false,
+          verticalAlignY: verticalAlignY,
+        );
+
+        return ColoredBox(
+          color: AppColors.bottomBarBg,
+          child: Stack(
+            children: [
+              Positioned(
+                left: layout.offsetX,
+                top: layout.offsetY,
+                width: layout.scaledW,
+                height: layout.scaledH,
+                child: const NativeCameraPreview(),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 import '../api/api.dart';
@@ -123,11 +121,6 @@ class CameraSoundStore extends ChangeNotifier {
   Future<void> refreshSidebarEffects({int? languageId}) async {
     await fetchAllEffects(languageId: languageId, pageSize: 500);
     await fetchCustomEffects(languageId: languageId);
-    if (kDebugMode) {
-      debugPrint(
-        '[CameraSoundStore] sidebarEffects: ${sidebarEffects.length}',
-      );
-    }
     notifyListeners();
   }
 
@@ -174,13 +167,7 @@ class CameraSoundStore extends ChangeNotifier {
       _categories
         ..clear()
         ..addAll(_parseList(res.data));
-      if (kDebugMode) {
-        debugPrint('[CameraSoundStore] categories: ${_categories.length}');
-      }
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[CameraSoundStore] fetchCategories failed: $e');
-      }
+    } on ApiException catch (_) {
     } finally {
       categoriesLoading = false;
       notifyListeners();
@@ -203,15 +190,7 @@ class CameraSoundStore extends ChangeNotifier {
 
       final res = await Api.get(ApiPaths.getSoundEffects, query: query);
       _allEffects = _parsePagedList(res.data).map(_normalizeEffect).toList();
-      if (kDebugMode) {
-        debugPrint(
-          '[CameraSoundStore] allEffects: ${_allEffects.length}',
-        );
-      }
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[CameraSoundStore] fetchAllEffects failed: $e');
-      }
+    } on ApiException catch (_) {
     } finally {
       allEffectsLoading = false;
       notifyListeners();
@@ -296,14 +275,7 @@ class CameraSoundStore extends ChangeNotifier {
         }
         _mergeEffectsIntoAll(list);
       }
-      if (kDebugMode) {
-        final pretty = const JsonEncoder.withIndent('  ').convert(res.data);
-        debugPrint('[CameraSoundStore] effects cat=$categoryId:\n$pretty');
-      }
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[CameraSoundStore] fetchEffects failed: $e');
-      }
+    } on ApiException catch (_) {
     } finally {
       effectsLoading = false;
       notifyListeners();
@@ -397,9 +369,6 @@ class CameraSoundStore extends ChangeNotifier {
       notifyListeners();
       return (ok: true, msg: res.msg);
     } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[CameraSoundStore] deleteCustomSoundEffect failed: $e');
-      }
       return (ok: false, msg: e.message);
     }
   }
@@ -418,9 +387,6 @@ class CameraSoundStore extends ChangeNotifier {
       );
       return (ok: true, msg: res.msg);
     } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[CameraSoundStore] setSoundEffectSort failed: $e');
-      }
       return (ok: false, msg: e.message);
     }
   }

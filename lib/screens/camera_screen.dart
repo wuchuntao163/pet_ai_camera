@@ -14,6 +14,7 @@ import '../widgets/camera_top_bar.dart';
 import '../widgets/camera_bottom_bar.dart';
 import '../widgets/pet_emoji_button.dart';
 import '../widgets/zoom_control.dart';
+import '../widgets/aspect_ratio_mask.dart';
 import '../widgets/camera_preview_view.dart';
 
 import '../widgets/capture_shutter_overlay.dart';
@@ -81,18 +82,42 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     await _initCamera();
   }
 
-  void _applyCaptureGalleryThumb(
-    String localPath, {
-    String? thumbnailPath,
-  }) {
+  void _applyCaptureGalleryThumb(String localPath, {String? thumbnailPath}) {
     _galleryThumbPreferCloud = false;
-    _galleryThumbLocalPath = thumbnailPath ?? localPath;
+    if (Platform.isIOS) {
+      _galleryThumbLocalPath = thumbnailPath ?? localPath;
+    } else {
+      _galleryThumbLocalPath = localPath;
+    }
     _galleryThumbRemoteUrl = null;
     _lastPhotoRevision++;
   }
 
   void _syncGalleryThumbFromLatest({required bool preferCloud}) {
     final latest = _photoGallery.latestPhoto;
+
+    if (!Platform.isIOS) {
+      _galleryThumbPreferCloud = preferCloud;
+      if (latest == null) {
+        _galleryThumbLocalPath = null;
+        _galleryThumbRemoteUrl = null;
+        return;
+      }
+      if (preferCloud) {
+        _galleryThumbLocalPath = null;
+        _galleryThumbRemoteUrl = latest.remoteUrl;
+      } else if (latest.hasLocalFile) {
+        _galleryThumbLocalPath = latest.localPath;
+        _galleryThumbRemoteUrl = latest.remoteUrl;
+      } else {
+        _galleryThumbLocalPath = null;
+        _galleryThumbRemoteUrl = latest.remoteUrl;
+        _galleryThumbPreferCloud = latest.remoteUrl != null;
+      }
+      _lastPhotoRevision++;
+      return;
+    }
+
     final hadMemoryThumb = _galleryThumbBytes != null && _galleryThumbBytes!.isNotEmpty;
     final previousLocalPath = _galleryThumbLocalPath;
     final previousRemoteUrl = _galleryThumbRemoteUrl;
@@ -110,7 +135,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       return;
     }
 
-    // 内存缩略图仅用于刚拍完；从相册/索引同步时以 latest 为准
     _galleryThumbBytes = null;
 
     if (preferCloud) {
@@ -219,22 +243,20 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
               : '需要相机权限才能拍摄';
         });
       }
-    } on CameraInitException catch (e) {
+    } on CameraInitException catch (_) {
       if (mounted) {
         setState(() {
           _isLoading = false;
           _errorMessage = '相机启动失败，请重试';
         });
       }
-      debugPrint('CameraInitException: ${e.message}');
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         setState(() {
           _isLoading = false;
           _errorMessage = '相机启动失败，请重试';
         });
       }
-      debugPrint('Camera init error: $e');
     }
   }
 
@@ -307,9 +329,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         if (mounted) setState(() => _flashState = FlashToolbarState.off);
       }
       if (mounted) setState(() {});
-    } catch (e) {
-      debugPrint('switchCamera error: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _onZoomChanged(double zoom) async {
@@ -355,7 +375,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           SidebarSoundStore.instance.activeSoundEffectId;
 
       for (var i = 0; i < burstCount; i++) {
-        if (mounted) {
+        if (Platform.isAndroid) {
+          if (i == 0 && mounted) {
+            setState(() => _isGalleryLoading = true);
+          }
+        } else if (mounted) {
           setState(() => _isGalleryLoading = true);
         }
         if (mounted) _playCaptureFlash();
@@ -370,43 +394,55 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           ),
         );
         if (capture != null) {
-          Uint8List? thumbBytes = capture.thumbnailBytes;
-          final thumbPath = capture.thumbnailPath;
-          if (thumbBytes == null && thumbPath != null) {
-            try {
-              thumbBytes = await File(thumbPath).readAsBytes();
-            } catch (e) {
-              debugPrint('read gallery thumb failed: $e');
-            }
-          }
-          if (mounted) {
-            setState(() => _isGalleryLoading = false);
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
+          if (Platform.isAndroid) {
+            if (mounted) {
               setState(() {
-                _galleryThumbBytes = thumbBytes;
-                _applyCaptureGalleryThumb(
-                  capture.fullPath,
-                  thumbnailPath: thumbPath,
-                );
+                _applyCaptureGalleryThumb(capture.fullPath);
+                _isGalleryLoading = false;
               });
-            });
-          }
-
-          // 与 Android 一致：缩略图先出图，登记/裁切/上传后台进行
-          unawaited(
-            _processCaptureAfterShutter(
-              capturePath: capture.fullPath,
-              cropContext: cropContext,
-              reserved: reserved,
+            }
+            unawaited(_photoGallery.registerCapture(
+              id: reserved.id,
+              localPath: capture.fullPath,
               soundEffectId: sessionSoundEffectId,
-            ).then((ok) {
-              if (!mounted || !ok) return;
-              final latest = _photoGallery.latestPhoto;
-              if (latest?.remoteUrl == null) return;
-              setState(() => _galleryThumbRemoteUrl = latest!.remoteUrl);
-            }),
-          );
+            ));
+          } else {
+            Uint8List? thumbBytes = capture.thumbnailBytes;
+            final thumbPath = capture.thumbnailPath;
+            if (thumbBytes == null && thumbPath != null) {
+              try {
+                thumbBytes = await File(thumbPath).readAsBytes();
+              } catch (_) {}
+            }
+            if (mounted) {
+              setState(() => _isGalleryLoading = false);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() {
+                  _galleryThumbBytes = thumbBytes;
+                  _applyCaptureGalleryThumb(
+                    capture.fullPath,
+                    thumbnailPath: thumbPath,
+                  );
+                });
+              });
+            }
+            unawaited(
+              _processCaptureAfterShutter(
+                capturePath: capture.fullPath,
+                cropContext: cropContext,
+                reserved: reserved,
+                soundEffectId: sessionSoundEffectId,
+              ).then((ok) {
+                if (!mounted || !ok) return;
+                final latest = _photoGallery.latestPhoto;
+                if (latest?.remoteUrl == null) return;
+                setState(() => _galleryThumbRemoteUrl = latest!.remoteUrl);
+              }),
+            );
+          }
+        } else if (Platform.isAndroid) {
+          if (i == 0) _stopGalleryLoading();
         } else if (mounted) {
           setState(() => _isGalleryLoading = false);
         }
@@ -435,6 +471,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
+  void _stopGalleryLoading() {
+    if (!mounted || !_isGalleryLoading) return;
+    setState(() => _isGalleryLoading = false);
+  }
+
   Future<bool> _processCaptureAfterShutter({
     required String capturePath,
     required _CaptureCropContext cropContext,
@@ -444,19 +485,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     var localPath = capturePath;
 
     if (cropContext.aspectOption.usesNativeSensorOutput) {
-      if (!Platform.isIOS) {
-        await PhotoCropService.cropToPreviewFrame(
-          sourcePath: localPath,
-          aspectOption: cropContext.aspectOption,
-          screenSize: cropContext.screenSize,
-          previewAspect: cropContext.previewAspect,
-          frameAlignY: cropContext.frameAlignY,
-          fitContain: cropContext.fitContain,
-          fullScreenPreview: cropContext.fullScreenPreview,
-          mirrorFront: cropContext.mirrorFront,
-        );
-      }
-    } else if (Platform.isIOS) {
+      // iOS 3:4 已在原生侧处理；其余比例在 Dart 裁切
+    } else {
       await PhotoCropService.cropToPreviewFrame(
         sourcePath: localPath,
         aspectOption: cropContext.aspectOption,
@@ -504,8 +534,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         await source.delete();
       }
       return true;
-    } catch (e) {
-      debugPrint('_moveCaptureToReserved failed: $e');
+    } catch (_) {
       return false;
     }
   }
@@ -619,12 +648,30 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       return _buildPlaceholder(message: '正在启动相机...');
     }
 
+    if (Platform.isIOS) {
+      return CameraPreviewView(
+        key: const ValueKey('camera_preview_view'),
+        maskRatio: _aspectRatio.usesPreviewMask ? _aspectRatio.ratio : null,
+        verticalAlignY: _previewVerticalAlignY,
+      );
+    }
+
+    final sensorAspect = _cameraService.previewAspectRatio;
     final preview = CameraPreviewView(
-      key: const ValueKey('camera_preview_view'),
-      maskRatio: _aspectRatio.usesPreviewMask ? _aspectRatio.ratio : null,
+      usePositionedLayout: true,
+      previewAspectRatio: sensorAspect,
+      fitContain: _aspectRatio.usesNativeSensorOutput,
+      fullScreen: _aspectRatio.usesFullScreenPreview,
       verticalAlignY: _previewVerticalAlignY,
     );
-    return preview;
+    if (!_aspectRatio.usesPreviewMask) {
+      return preview;
+    }
+    return AspectRatioMask(
+      ratio: _aspectRatio.ratio,
+      frameAlignY: _previewVerticalAlignY,
+      child: preview,
+    );
   }
 
   Widget _buildPlaceholder({
@@ -784,9 +831,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final fullScreenPreview = _aspectRatio.usesFullScreenPreview;
+  /// iOS / Android 9:16：预览铺满整屏，顶/底栏叠在上面
+  Widget _buildFullScreenLayout(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.cameraBg,
       body: Stack(
@@ -802,15 +848,52 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
               Expanded(child: _buildPreviewOverlays()),
               SafeArea(
                 top: false,
-                child: _buildBottomBar(
-                  transparentBackground: fullScreenPreview,
-                ),
+                child: _buildBottomBar(transparentBackground: true),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  /// Android 非 9:16：预览在顶栏与底栏之间，3:4 上下留黑边
+  Widget _buildStandardLayout(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bottomBarBg,
+      body: Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: _buildTopBar(),
+          ),
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildPreviewArea(context),
+                _buildPreviewOverlays(),
+              ],
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: _buildBottomBar(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (Platform.isIOS) {
+      return _buildFullScreenLayout(context);
+    }
+    if (_aspectRatio.usesFullScreenPreview) {
+      return _buildFullScreenLayout(context);
+    }
+    return _buildStandardLayout(context);
   }
 }
 

@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 import '../api/api.dart';
 
 /// 用户相关接口：展示读本地缓存，需最新数据时调用 [refreshUserInfo]
@@ -23,10 +21,6 @@ class UserService {
           Map<String, dynamic>.from(info),
         );
       }
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[UserService] refreshUserInfo failed: $e');
-      }
-    }
+    } on ApiException catch (_) {}
   }
 }

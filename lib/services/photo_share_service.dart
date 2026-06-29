@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
@@ -16,7 +15,6 @@ class PhotoShareService {
       final filePath = p.normalize(rawPath);
       final file = File(filePath);
       if (!await file.exists()) {
-        debugPrint('PhotoShareService: file missing: $filePath');
         continue;
       }
       files.add(
@@ -32,13 +30,10 @@ class PhotoShareService {
       throw StateError('No shareable photo files found');
     }
 
-    final result = await Share.shareXFiles(
+    await Share.shareXFiles(
       files,
       fileNameOverrides: files.map((f) => f.name).toList(),
     );
 
-    if (result.status == ShareResultStatus.unavailable) {
-      debugPrint('PhotoShareService: share unavailable');
-    }
   }
 }

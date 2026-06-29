@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
+
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/camera_config.dart';
@@ -42,10 +43,6 @@ class CameraService {
     _nativePreviewContain = true;
     _initialized = true;
     await setZoomLevel(_baselineOneX);
-    debugPrint(
-      'Native camera ready: baseline=$_baselineOneX aspect=$_previewAspectRatio '
-      'back=$_isBackCamera',
-    );
   }
 
   Future<void> switchCamera() async {
@@ -62,8 +59,7 @@ class CameraService {
       await NativeCameraChannel.setFlash(state);
       _lastAppliedFlash = state;
       return true;
-    } catch (e) {
-      debugPrint('applyToolbarFlash failed: $e');
+    } catch (_) {
       return false;
     }
   }
@@ -82,22 +78,13 @@ class CameraService {
       if (toolbarFlash != null) {
         await syncFlashBeforeCapture(toolbarFlash);
       }
-      final sw = Stopwatch()..start();
       final result = await NativeCameraChannel.takePicture(crop: crop);
-      sw.stop();
-      final nativeMs = result.captureDurationMs;
-      debugPrint(
-        'NativeCamera: Capture done in ${nativeMs ?? sw.elapsedMilliseconds}ms '
-        'direct=${result.directOutput} '
-        '(channel=${sw.elapsedMilliseconds}ms)',
-      );
       return CapturePhotoResult(
         fullPath: result.path,
         thumbnailPath: result.thumbnailPath,
         thumbnailBytes: result.thumbnailBytes,
       );
-    } catch (e) {
-      debugPrint('takePicture failed: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -108,9 +95,7 @@ class CameraService {
     if (!_initialized) return;
     try {
       await NativeCameraChannel.setZoom(level);
-    } catch (e) {
-      debugPrint('setZoomLevel failed: $e');
-    }
+    } catch (_) {}
   }
 
   bool _nativePreviewContain = true;
@@ -128,9 +113,7 @@ class CameraService {
         viewportAspect: viewportAspect,
       );
       _applyInitResult(result);
-    } catch (e) {
-      debugPrint('setPreviewMode failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> pause() async {
@@ -143,9 +126,7 @@ class CameraService {
     try {
       final result = await NativeCameraChannel.resume();
       _applyInitResult(result);
-    } catch (e) {
-      debugPrint('resume failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> dispose() async {

@@ -102,8 +102,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
 
     try {
       await PhotoShareService.sharePaths(paths);
-    } catch (e) {
-      debugPrint('PhotoGalleryScreen share failed: $e');
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('分享失败，请重试')),

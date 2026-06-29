@@ -295,8 +295,7 @@ class PhotoGalleryService {
 
     try {
       await CameraRecordStore.instance.fetchList(recordType: recordType);
-    } catch (e) {
-      debugPrint('PhotoGalleryService: refreshFromServer failed: $e');
+    } catch (_) {
       return;
     }
 
@@ -353,9 +352,7 @@ class PhotoGalleryService {
         if (await file.exists()) {
           await file.delete();
         }
-      } catch (e) {
-        debugPrint('PhotoGalleryService: delete local file failed: $e');
-      }
+      } catch (_) {}
     }
 
     try {
@@ -365,9 +362,7 @@ class PhotoGalleryService {
           await entity.delete();
         }
       }
-    } catch (e) {
-      debugPrint('PhotoGalleryService: clear photos dir failed: $e');
-    }
+    } catch (_) {}
 
     _photos.removeWhere((photo) => photo.hasLocalFile);
     await _persistIndex();
@@ -380,7 +375,6 @@ class PhotoGalleryService {
     if (index < 0 || _photos[index].galleryAssetId != null) return;
 
     if (!await ensurePermission()) {
-      debugPrint('PhotoGalleryService: gallery permission denied for sync');
       return;
     }
 
@@ -406,9 +400,7 @@ class PhotoGalleryService {
         relativePath: _albumFolder,
       );
       return entity.id;
-    } catch (e) {
-      debugPrint('PhotoGalleryService: save with album path failed: $e');
-    }
+    } catch (_) {}
 
     try {
       final entity = await PhotoManager.editor.saveImageWithPath(
@@ -416,8 +408,7 @@ class PhotoGalleryService {
         title: title,
       );
       return entity.id;
-    } catch (e) {
-      debugPrint('PhotoGalleryService: save to gallery failed: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -507,9 +498,7 @@ class PhotoGalleryService {
     if (photo.galleryAssetId != null) {
       try {
         await PhotoManager.editor.deleteWithIds([photo.galleryAssetId!]);
-      } catch (e) {
-        debugPrint('PhotoGalleryService: delete from gallery failed: $e');
-      }
+      } catch (_) {}
     }
 
     try {
@@ -517,9 +506,7 @@ class PhotoGalleryService {
       if (photo.hasLocalFile && await file.exists()) {
         await file.delete();
       }
-    } catch (e) {
-      debugPrint('PhotoGalleryService: delete local file failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<Directory> _cloudCacheDirectory() async {
@@ -599,8 +586,7 @@ class PhotoGalleryService {
       if (source.path == cachePath) return true;
       await source.copy(cachePath);
       return await dest.exists() && await dest.length() > 0;
-    } catch (e) {
-      debugPrint('PhotoGalleryService: copy cache failed: $e');
+    } catch (_) {
       return false;
     }
   }
@@ -612,8 +598,7 @@ class PhotoGalleryService {
       final dio = Dio();
       await dio.download(url, cachePath);
       return await dest.exists() && await dest.length() > 0;
-    } catch (e) {
-      debugPrint('PhotoGalleryService: download cache failed: $e');
+    } catch (_) {
       return false;
     }
   }
@@ -625,9 +610,7 @@ class PhotoGalleryService {
       if (await file.exists()) {
         await file.delete();
       }
-    } catch (e) {
-      debugPrint('PhotoGalleryService: delete cache failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _pruneCloudCache(Set<int> activeRecordIds) async {
@@ -642,9 +625,7 @@ class PhotoGalleryService {
           await entity.delete();
         }
       }
-    } catch (e) {
-      debugPrint('PhotoGalleryService: prune cache failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _clearCloudCache() async {
@@ -655,9 +636,7 @@ class PhotoGalleryService {
           await entity.delete();
         }
       }
-    } catch (e) {
-      debugPrint('PhotoGalleryService: clear cloud cache failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _persistCloudGalleryIndex() async {
@@ -666,9 +645,7 @@ class PhotoGalleryService {
       final indexFile = File(p.join(base.path, _cloudGalleryIndexFileName));
       final jsonList = _cloudGalleryPhotos.map((photo) => photo.toJson()).toList();
       await indexFile.writeAsString(jsonEncode(jsonList));
-    } catch (e) {
-      debugPrint('PhotoGalleryService: persist cloud gallery index failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<Directory> _photosDirectory() async {
@@ -703,9 +680,7 @@ class PhotoGalleryService {
         }
       }
       _photos.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
-    } catch (e) {
-      debugPrint('PhotoGalleryService: load index failed: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _persistIndex() async {
@@ -714,9 +689,7 @@ class PhotoGalleryService {
       final indexFile = File(p.join(base.path, _indexFileName));
       final jsonList = _photos.map((photo) => photo.toJson()).toList();
       await indexFile.writeAsString(jsonEncode(jsonList));
-    } catch (e) {
-      debugPrint('PhotoGalleryService: persist index failed: $e');
-    }
+    } catch (_) {}
   }
 
   static int _asInt(dynamic value) {

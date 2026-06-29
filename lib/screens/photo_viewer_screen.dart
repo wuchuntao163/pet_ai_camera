@@ -113,8 +113,7 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
     }
     try {
       await PhotoShareService.sharePaths([photo.localPath]);
-    } catch (e) {
-      debugPrint('PhotoViewerScreen share failed: $e');
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('分享失败，请重试')),

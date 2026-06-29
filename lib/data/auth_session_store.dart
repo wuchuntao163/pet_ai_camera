@@ -97,8 +97,7 @@ class AuthSessionStore extends ChangeNotifier {
       } else {
         _cloudSync = hasPhone;
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[AuthSessionStore] init failed: $e');
+    } catch (_) {
     } finally {
       _loaded = true;
     }

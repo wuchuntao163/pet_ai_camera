@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/camera_config.dart';
@@ -87,9 +86,7 @@ class NativeCameraChannel {
   static Future<void> dispose() async {
     try {
       await _channel.invokeMethod<void>('dispose');
-    } catch (e) {
-      debugPrint('NativeCameraChannel.dispose: $e');
-    }
+    } catch (_) {}
   }
 
   static Future<NativeCameraInitResult> switchCamera() async {

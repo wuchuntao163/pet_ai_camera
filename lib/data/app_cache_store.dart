@@ -33,11 +33,7 @@ class AppCacheStore extends ChangeNotifier {
       try {
         final decoded = jsonDecode(cached);
         await setConfig(decoded, persist: false, markLoaded: false);
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[AppCacheStore] cached config parse failed: $e');
-        }
-      }
+      } catch (_) {}
     }
   }
 
@@ -58,17 +54,8 @@ class AppCacheStore extends ChangeNotifier {
     try {
       final res = await Api.get(ApiPaths.getConfig);
       await setConfig(res.data);
-      if (kDebugMode) {
-        debugPrint('[AppCacheStore] getConfig ok');
-      }
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[AppCacheStore] getConfig failed: $e');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[AppCacheStore] getConfig error: $e');
-      }
+    } on ApiException catch (_) {
+    } catch (_) {
     } finally {
       configLoading = false;
       if (!configLoaded && _config != null) {
@@ -86,9 +73,6 @@ class AppCacheStore extends ChangeNotifier {
   }) async {
     final parsed = _extractConfig(data);
     if (parsed == null) {
-      if (kDebugMode) {
-        debugPrint('[AppCacheStore] setConfig: unrecognized shape $data');
-      }
       return;
     }
     _config = parsed;
@@ -97,11 +81,7 @@ class AppCacheStore extends ChangeNotifier {
       _prefs ??= await SharedPreferences.getInstance();
       try {
         await _prefs!.setString(_keyCachedConfig, jsonEncode(data));
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[AppCacheStore] cache config failed: $e');
-        }
-      }
+      } catch (_) {}
     }
     notifyListeners();
   }

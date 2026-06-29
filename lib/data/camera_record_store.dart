@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 
 import '../api/api.dart';
-import '../utils/debug_log.dart';
 import '../services/file_upload_service.dart';
 
 /// 相机拍摄记录：保存、列表、删除
@@ -27,24 +26,6 @@ class CameraRecordStore extends ChangeNotifier {
         ..clear()
         ..addAll(_parseList(res.data));
       listLoaded = true;
-      if (kDebugMode) {
-        appLog('[CameraRecordStore] fetchList: ${_records.length} items');
-        for (var i = 0; i < _records.length && i < 5; i++) {
-          final item = _records[i];
-          appLog(
-            '  [$i] id=${item['id']} (→ record_id) file_url=${item['file_url']}',
-          );
-        }
-        if (_records.length > 5) {
-          appLog('  ... and ${_records.length - 5} more');
-        }
-      }
-    } on ApiException catch (e) {
-      appLog(
-        '[CameraRecordStore] fetchList failed: code=${e.code} msg=${e.message}\n'
-        '  rawData: ${e.rawData}',
-      );
-      rethrow;
     } finally {
       isLoading = false;
       notifyListeners();

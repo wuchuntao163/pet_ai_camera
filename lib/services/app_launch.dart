@@ -49,40 +49,27 @@ class AppLaunch extends ChangeNotifier {
       if (data != null) {
         await AuthSessionStore.instance.saveData(data);
       }
-    } on ApiException catch (e) {
-      debugPrint('[AppLaunch] loginByUuid failed: $e');
-    }
+    } on ApiException catch (_) {}
   }
 
   Future<void> _fetchNav() async {
     try {
       final res = await Api.get(ApiPaths.nav, query: {'type': 2});
       _cache.setNavList(res.data);
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[AppLaunch] getNav failed: $e');
-      }
-    }
+    } on ApiException catch (_) {}
   }
 
   Future<void> _fetchAppInfo() async {
     try {
       final res = await Api.get(ApiPaths.getAppInfo);
       _cache.setAppInfo(res.data);
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[AppLaunch] getAppInfo failed: $e');
-      }
-    }
+    } on ApiException catch (_) {}
   }
 
   Future<void> _prefetchCameraRecords() async {
     try {
       await CameraRecordStore.instance.fetchList(recordType: 1);
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[AppLaunch] getCameraRecords failed: $e');
-      }
+    } on ApiException catch (_) {
     }
   }
 
@@ -90,10 +77,6 @@ class AppLaunch extends ChangeNotifier {
     try {
       final res = await Api.get(ApiPaths.getLanguage);
       _cache.setLanguage(res.data);
-    } on ApiException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[AppLaunch] getLanguage failed: $e');
-      }
-    }
+    } on ApiException catch (_) {}
   }
 }

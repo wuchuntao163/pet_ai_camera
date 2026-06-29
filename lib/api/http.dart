@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../data/auth_session_store.dart';
 import 'api_config.dart';
+import 'api_paths.dart';
 
 // ─────────────────────────────────────────────────────────────
 //  对外入口：先 Api.init()，再 Api.get / Api.post
@@ -243,6 +244,7 @@ class _Http {
         '[API] DioException ${e.requestOptions.path}\n'
         '  status: ${e.response?.statusCode}\n'
         '  raw: ${_truncateForLog(e.response?.data)}',
+        path: e.requestOptions.path,
       );
       throw ApiException.network(
         e.error?.toString() ?? e.message ?? '网络请求失败',
@@ -266,14 +268,15 @@ class _Http {
         'msg': msg,
         'data': _envelopeDataForLog(payload),
       })}',
+      path: path,
     );
 
     if (code == 8001) {
-      _logApi('[API] business error $path: code=$code msg=$msg');
+      _logApi('[API] business error $path: code=$code msg=$msg', path: path);
       throw ApiException.business(code, msg.isNotEmpty ? msg : '签名错误', payload);
     }
     if (code != 200 && code != 4000) {
-      _logApi('[API] business error $path: code=$code msg=$msg');
+      _logApi('[API] business error $path: code=$code msg=$msg', path: path);
       throw ApiException.business(
         code,
         msg.isNotEmpty ? msg : '请求失败($code)',
@@ -289,6 +292,7 @@ class _Http {
       );
       _logApi(
         '[API] decrypted $path:\n${_prettyJson(decrypted)}',
+        path: path,
       );
       final parsed =
           parser != null && decrypted != null ? parser(decrypted) : decrypted as T?;
@@ -301,6 +305,7 @@ class _Http {
           'data': result.data,
           'fromEncrypted': true,
         })}',
+        path: path,
       );
       return result;
     }
@@ -312,6 +317,7 @@ class _Http {
         'msg': result.msg,
         'data': result.data,
       })}',
+      path: path,
     );
     return result;
   }
@@ -383,7 +389,9 @@ class _AuthInterceptor extends Interceptor {
 class _LogInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    if (kDebugMode && ApiConfig.enableLog) {
+    if (kDebugMode &&
+        ApiConfig.enableLog &&
+        _shouldLogApiPath(options.path)) {
       // ignore: avoid_print
       print('[API] --> ${options.method} ${options.uri}');
       if (options.data != null) {
@@ -396,7 +404,9 @@ class _LogInterceptor extends Interceptor {
 
   @override
   void onResponse(Response response, ResponseInterceptorHandler handler) {
-    if (kDebugMode && ApiConfig.enableLog) {
+    if (kDebugMode &&
+        ApiConfig.enableLog &&
+        _shouldLogApiPath(response.requestOptions.path)) {
       final path = response.requestOptions.path;
       // ignore: avoid_print
       print('[API] <-- ${response.statusCode} $path');
@@ -410,11 +420,17 @@ class _ErrorInterceptor extends Interceptor {
   void onError(DioException err, ErrorInterceptorHandler handler) {
     final path = err.requestOptions.path;
     final raw = err.response?.data;
-    _logApi(
-      '[API] HTTP error $path\n'
-      '  status: ${err.response?.statusCode}\n'
-      '  raw: ${_truncateForLog(raw)}',
-    );
+    final suppressLog = !_shouldLogApiPath(path);
+
+    if (!suppressLog) {
+      _logApi(
+        '[API] HTTP error $path\n'
+        '  status: ${err.response?.statusCode}\n'
+        '  raw: ${_truncateForLog(raw)}',
+        path: path,
+      );
+    }
+
     if (raw != null) {
       try {
         final map = _Http.instance._parseJson(raw);
@@ -427,14 +443,17 @@ class _ErrorInterceptor extends Interceptor {
             payload['k'].toString(),
             payload['r'].toString(),
           );
-          _logApi('[API] HTTP error decrypted $path:\n${_prettyJson(decrypted)}');
-        } else {
+          if (!suppressLog) {
+            _logApi('[API] HTTP error decrypted $path:\n${_prettyJson(decrypted)}', path: path);
+          }
+        } else if (!suppressLog) {
           _logApi(
             '[API] HTTP error envelope $path:\n${_prettyJson({
               'code': code,
               'msg': msg,
               'data': payload,
             })}',
+            path: path,
           );
         }
         handler.reject(DioException(
@@ -445,7 +464,9 @@ class _ErrorInterceptor extends Interceptor {
         ));
         return;
       } catch (parseErr) {
-        _logApi('[API] HTTP error parse failed $path: $parseErr');
+        if (!suppressLog) {
+          _logApi('[API] HTTP error parse failed $path: $parseErr', path: path);
+        }
       }
     }
     handler.reject(DioException(
@@ -506,11 +527,22 @@ int _asInt(dynamic v) {
   return 0;
 }
 
-void _logApi(String message) {
+void _logApi(String message, {required String path}) {
+  if (!_shouldLogApiPath(path)) return;
   if (kDebugMode && ApiConfig.enableLog) {
     // ignore: avoid_print
     print(message);
   }
+}
+
+bool _shouldLogApiPath(String path) {
+  const allowed = [
+    ApiPaths.saveCameraRecord,
+    ApiPaths.addCustomSoundEffect,
+    ApiPaths.uploadLocalImage,
+    ApiPaths.upload,
+  ];
+  return allowed.any(path.contains);
 }
 
 String _prettyJson(dynamic data) {
