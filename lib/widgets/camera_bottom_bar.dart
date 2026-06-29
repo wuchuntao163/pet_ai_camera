@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
@@ -16,6 +17,7 @@ class CameraBottomBar extends StatelessWidget {
   final ValueChanged<bool>? onModeChanged;
   final String? galleryThumbLocalPath;
   final String? galleryThumbRemoteUrl;
+  final Uint8List? galleryThumbBytes;
   final bool galleryThumbPreferCloud;
   final int lastPhotoRevision;
   final bool isGalleryLoading;
@@ -30,6 +32,7 @@ class CameraBottomBar extends StatelessWidget {
     this.onModeChanged,
     this.galleryThumbLocalPath,
     this.galleryThumbRemoteUrl,
+    this.galleryThumbBytes,
     this.galleryThumbPreferCloud = false,
     this.lastPhotoRevision = 0,
     this.isGalleryLoading = false,
@@ -68,6 +71,7 @@ class CameraBottomBar extends StatelessWidget {
               _GalleryButton(
                 localPath: galleryThumbLocalPath,
                 remoteUrl: galleryThumbRemoteUrl,
+                thumbBytes: galleryThumbBytes,
                 preferCloud: galleryThumbPreferCloud,
                 revision: lastPhotoRevision,
                 isLoading: isGalleryLoading,
@@ -115,10 +119,11 @@ class CameraBottomBar extends StatelessWidget {
   }
 }
 
-/// 左下角相册：正方形缩略图框（拍照后优先本地，进相册返回后优先云端）
+/// 左下角相册：刚拍完用内存缩略图，其余时候用本地缓存/网络图
 class _GalleryButton extends StatelessWidget {
   final String? localPath;
   final String? remoteUrl;
+  final Uint8List? thumbBytes;
   final bool preferCloud;
   final int revision;
   final bool isLoading;
@@ -127,6 +132,7 @@ class _GalleryButton extends StatelessWidget {
   const _GalleryButton({
     this.localPath,
     this.remoteUrl,
+    this.thumbBytes,
     this.preferCloud = false,
     this.revision = 0,
     this.isLoading = false,
@@ -141,7 +147,9 @@ class _GalleryButton extends StatelessWidget {
     final cacheSize =
         (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(48, 96);
 
-    final showLocal = !preferCloud && localPath != null && localPath!.isNotEmpty;
+    final showMemory = thumbBytes != null && thumbBytes!.isNotEmpty;
+    final showLocal =
+        !preferCloud && !showMemory && localPath != null && localPath!.isNotEmpty;
     final showRemote = preferCloud && remoteUrl != null && remoteUrl!.isNotEmpty;
 
     return GestureDetector(
@@ -157,7 +165,16 @@ class _GalleryButton extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (showLocal)
+            if (showMemory)
+              Image.memory(
+                thumbBytes!,
+                key: ValueKey('memory-$revision'),
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              )
+            else if (showLocal)
               Image.file(
                 File(localPath!),
                 key: ValueKey('local-$localPath-$revision'),
@@ -167,6 +184,16 @@ class _GalleryButton extends StatelessWidget {
                 cacheHeight: cacheSize,
                 gaplessPlayback: true,
                 fit: BoxFit.cover,
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded || frame != null) return child;
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _placeholder(),
+                      _loadingOverlay(),
+                    ],
+                  );
+                },
               )
             else if (showRemote)
               Image.network(
@@ -178,6 +205,16 @@ class _GalleryButton extends StatelessWidget {
                 cacheHeight: cacheSize,
                 gaplessPlayback: true,
                 fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _placeholder(),
+                      _loadingOverlay(),
+                    ],
+                  );
+                },
                 errorBuilder: (context, error, stackTrace) => _placeholder(),
               )
             else if (localPath != null && localPath!.isNotEmpty)
@@ -190,23 +227,20 @@ class _GalleryButton extends StatelessWidget {
                 cacheHeight: cacheSize,
                 gaplessPlayback: true,
                 fit: BoxFit.cover,
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded || frame != null) return child;
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _placeholder(),
+                      _loadingOverlay(),
+                    ],
+                  );
+                },
               )
             else
               _placeholder(),
-            if (isLoading)
-              Container(
-                color: const Color(0x99000000),
-                child: const Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.textOnDark,
-                    ),
-                  ),
-                ),
-              ),
+            if (isLoading) _loadingOverlay(),
           ],
         ),
       ),
@@ -220,6 +254,22 @@ class _GalleryButton extends StatelessWidget {
         width: 28,
         height: 28,
         fit: BoxFit.contain,
+      ),
+    );
+  }
+
+  Widget _loadingOverlay() {
+    return Container(
+      color: const Color(0x99000000),
+      child: const Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: AppColors.textOnDark,
+          ),
+        ),
       ),
     );
   }

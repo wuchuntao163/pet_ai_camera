@@ -76,9 +76,7 @@ object PhotoCropHelper {
     /** 解码并按 EXIF 旋转，裁切后覆盖原 JPEG */
     fun cropFileInPlace(file: File, params: CropParams): Boolean {
         if (params.directOutput) return true
-        if (params.nativeSensor && orientedAspectMatches(file, params.ratio)) {
-            return true
-        }
+        if (params.nativeSensor) return true
 
         val rotation = readExifRotation(file)
         val bounds = decodeBounds(file) ?: return false
@@ -101,8 +99,6 @@ object PhotoCropHelper {
                 orientedH,
                 params.copy(ratio = screenRatio),
             )
-        } else if (params.nativeSensor) {
-            centerCropRect(orientedW, orientedH, params.ratio)
         } else {
             computeCropRect(orientedW, orientedH, params)
         }

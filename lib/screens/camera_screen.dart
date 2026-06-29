@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
@@ -7,18 +8,17 @@ import '../constants/app_images.dart';
 import '../models/camera_config.dart';
 import '../models/camera_toolbar.dart';
 import '../services/camera_service.dart';
+import '../services/photo_crop_service.dart';
 import '../constants/app_sizes.dart';
 import '../widgets/camera_top_bar.dart';
 import '../widgets/camera_bottom_bar.dart';
 import '../widgets/pet_emoji_button.dart';
 import '../widgets/zoom_control.dart';
-import '../widgets/aspect_ratio_mask.dart';
 import '../widgets/camera_preview_view.dart';
 
 import '../widgets/capture_shutter_overlay.dart';
 import '../widgets/countdown_overlay.dart';
 import '../widgets/camera_tool_popups.dart';
-import '../services/photo_crop_service.dart';
 import '../services/sidebar_sound_store.dart';
 import '../data/app_cache_store.dart';
 import '../data/camera_sound_store.dart';
@@ -44,6 +44,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   bool _isPhotoMode = true;
   bool _isLoading = true;
   String? _errorMessage;
+  CameraPermissionState? _cameraPermissionState;
   bool _lifecyclePaused = false;
 
   int _aspectRatioIndex = AspectRatioOption.defaultIndex;
@@ -58,6 +59,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   String? _galleryThumbLocalPath;
   String? _galleryThumbRemoteUrl;
   bool _galleryThumbPreferCloud = false;
+  Uint8List? _galleryThumbBytes;
 
   @override
   void initState() {
@@ -79,21 +81,38 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     await _initCamera();
   }
 
-  void _applyCaptureGalleryThumb(String localPath) {
+  void _applyCaptureGalleryThumb(
+    String localPath, {
+    String? thumbnailPath,
+  }) {
     _galleryThumbPreferCloud = false;
-    _galleryThumbLocalPath = localPath;
+    _galleryThumbLocalPath = thumbnailPath ?? localPath;
     _galleryThumbRemoteUrl = null;
     _lastPhotoRevision++;
   }
 
   void _syncGalleryThumbFromLatest({required bool preferCloud}) {
     final latest = _photoGallery.latestPhoto;
+    final hadMemoryThumb = _galleryThumbBytes != null && _galleryThumbBytes!.isNotEmpty;
+    final previousLocalPath = _galleryThumbLocalPath;
+    final previousRemoteUrl = _galleryThumbRemoteUrl;
+
     _galleryThumbPreferCloud = preferCloud;
     if (latest == null) {
+      final hadVisibleThumb = hadMemoryThumb ||
+          previousLocalPath != null ||
+          previousRemoteUrl != null;
       _galleryThumbLocalPath = null;
       _galleryThumbRemoteUrl = null;
+      _galleryThumbBytes = null;
+      _galleryThumbPreferCloud = false;
+      if (hadVisibleThumb) _lastPhotoRevision++;
       return;
     }
+
+    // 内存缩略图仅用于刚拍完；从相册/索引同步时以 latest 为准
+    _galleryThumbBytes = null;
+
     if (preferCloud) {
       _galleryThumbLocalPath = null;
       _galleryThumbRemoteUrl = latest.remoteUrl;
@@ -105,7 +124,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       _galleryThumbRemoteUrl = latest.remoteUrl;
       _galleryThumbPreferCloud = latest.remoteUrl != null;
     }
-    _lastPhotoRevision++;
+
+    final displayChanged = hadMemoryThumb ||
+        previousLocalPath != _galleryThumbLocalPath ||
+        previousRemoteUrl != _galleryThumbRemoteUrl;
+    if (displayChanged) {
+      _lastPhotoRevision++;
+    }
   }
 
   @override
@@ -172,6 +197,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _cameraPermissionState = null;
     });
 
     try {
@@ -183,10 +209,14 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       await _syncPreviewModeForAspect();
       if (mounted) setState(() => _isLoading = false);
     } on CameraPermissionException {
+      final permissionState = await _cameraService.getCameraPermissionState();
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = '需要相机权限，请在系统设置中允许';
+          _cameraPermissionState = permissionState;
+          _errorMessage = permissionState == CameraPermissionState.permanentlyDenied
+              ? '相机权限未开启'
+              : '需要相机权限才能拍摄';
         });
       }
     } on CameraInitException catch (e) {
@@ -267,22 +297,18 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   Future<void> _flipCamera() async {
     if (!_cameraService.isInitialized) return;
-    setState(() => _isLoading = true);
     try {
       await _cameraService.switchCamera();
-      final baseline = await _cameraService.ensureBaselineOneX();
-      _currentZoom = baseline;
-      await _cameraService.setZoomLevel(baseline);
+      _currentZoom = _cameraService.baselineOneX;
       if (_cameraService.isBackCamera) {
         await _applyFlashState(_flashState);
       } else {
         await _applyFlashState(FlashToolbarState.off);
         if (mounted) setState(() => _flashState = FlashToolbarState.off);
       }
+      if (mounted) setState(() {});
     } catch (e) {
       debugPrint('switchCamera error: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -325,8 +351,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         if (mounted) setState(() => _countdown = null);
       }
 
+      final sessionSoundEffectId =
+          SidebarSoundStore.instance.activeSoundEffectId;
+
       for (var i = 0; i < burstCount; i++) {
-        if (i == 0 && mounted) {
+        if (mounted) {
           setState(() => _isGalleryLoading = true);
         }
         if (mounted) _playCaptureFlash();
@@ -341,33 +370,51 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           ),
         );
         if (capture != null) {
-          final soundEffectId = SidebarSoundStore.instance.activeSoundEffectId;
-          if (Platform.isAndroid) {
-            if (mounted) {
-              setState(() {
-                _applyCaptureGalleryThumb(capture.fullPath);
-                _isGalleryLoading = false;
-              });
+          Uint8List? thumbBytes = capture.thumbnailBytes;
+          final thumbPath = capture.thumbnailPath;
+          if (thumbBytes == null && thumbPath != null) {
+            try {
+              thumbBytes = await File(thumbPath).readAsBytes();
+            } catch (e) {
+              debugPrint('read gallery thumb failed: $e');
             }
-            unawaited(_photoGallery.registerCapture(
-              id: reserved.id,
-              localPath: capture.fullPath,
-              soundEffectId: soundEffectId,
-            ));
-          } else {
-            await _finalizeCapture(
-              capture.fullPath,
-              cropContext,
-              soundEffectId: soundEffectId,
-            );
           }
-        } else if (i == 0) {
-          _stopGalleryLoading();
+          if (mounted) {
+            setState(() => _isGalleryLoading = false);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              setState(() {
+                _galleryThumbBytes = thumbBytes;
+                _applyCaptureGalleryThumb(
+                  capture.fullPath,
+                  thumbnailPath: thumbPath,
+                );
+              });
+            });
+          }
+
+          // 与 Android 一致：缩略图先出图，登记/裁切/上传后台进行
+          unawaited(
+            _processCaptureAfterShutter(
+              capturePath: capture.fullPath,
+              cropContext: cropContext,
+              reserved: reserved,
+              soundEffectId: sessionSoundEffectId,
+            ).then((ok) {
+              if (!mounted || !ok) return;
+              final latest = _photoGallery.latestPhoto;
+              if (latest?.remoteUrl == null) return;
+              setState(() => _galleryThumbRemoteUrl = latest!.remoteUrl);
+            }),
+          );
+        } else if (mounted) {
+          setState(() => _isGalleryLoading = false);
         }
         if (i < burstCount - 1) {
           await Future.delayed(const Duration(milliseconds: 350));
         }
       }
+      await SidebarSoundStore.instance.stop();
     } finally {
       if (mounted) {
         setState(() {
@@ -388,19 +435,30 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
-  void _stopGalleryLoading() {
-    if (!mounted || !_isGalleryLoading) return;
-    setState(() => _isGalleryLoading = false);
-  }
-
-  Future<void> _finalizeCapture(
-    String tempPath,
-    _CaptureCropContext cropContext, {
+  Future<bool> _processCaptureAfterShutter({
+    required String capturePath,
+    required _CaptureCropContext cropContext,
+    required ({String id, String path}) reserved,
     int? soundEffectId,
   }) async {
-    try {
+    var localPath = capturePath;
+
+    if (cropContext.aspectOption.usesNativeSensorOutput) {
+      if (!Platform.isIOS) {
+        await PhotoCropService.cropToPreviewFrame(
+          sourcePath: localPath,
+          aspectOption: cropContext.aspectOption,
+          screenSize: cropContext.screenSize,
+          previewAspect: cropContext.previewAspect,
+          frameAlignY: cropContext.frameAlignY,
+          fitContain: cropContext.fitContain,
+          fullScreenPreview: cropContext.fullScreenPreview,
+          mirrorFront: cropContext.mirrorFront,
+        );
+      }
+    } else if (Platform.isIOS) {
       await PhotoCropService.cropToPreviewFrame(
-        sourcePath: tempPath,
+        sourcePath: localPath,
         aspectOption: cropContext.aspectOption,
         screenSize: cropContext.screenSize,
         previewAspect: cropContext.previewAspect,
@@ -409,28 +467,46 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         fullScreenPreview: cropContext.fullScreenPreview,
         mirrorFront: cropContext.mirrorFront,
       );
+    }
 
-      final saved = await _photoGallery.saveCaptureLocal(
-        tempPath,
-        moveFile: true,
-        soundEffectId: soundEffectId,
-      );
-      if (saved == null) {
-        if (mounted) _stopGalleryLoading();
-        return;
+    if (localPath != reserved.path) {
+      final moved = await _moveCaptureToReserved(localPath, reserved.path);
+      if (!moved) return false;
+      localPath = reserved.path;
+    }
+
+    await _photoGallery.registerCapture(
+      id: reserved.id,
+      localPath: localPath,
+      soundEffectId: soundEffectId,
+      upload: false,
+      syncToGallery: false,
+    );
+
+    unawaited(_photoGallery.syncToSystemGallery(reserved.id));
+    return await _photoGallery.uploadRecordForPhoto(
+      reserved.id,
+      soundEffectId: soundEffectId,
+    );
+  }
+
+  Future<bool> _moveCaptureToReserved(String sourcePath, String destPath) async {
+    try {
+      final source = File(sourcePath);
+      if (!await source.exists()) return false;
+      final dest = File(destPath);
+      await dest.parent.create(recursive: true);
+      if (sourcePath == destPath) return true;
+      try {
+        await source.rename(destPath);
+      } catch (_) {
+        await source.copy(destPath);
+        await source.delete();
       }
-
-      if (mounted) {
-        setState(() {
-          _applyCaptureGalleryThumb(saved.localPath);
-          _isGalleryLoading = false;
-        });
-      }
-
-      unawaited(_photoGallery.syncToSystemGallery(saved.id));
+      return true;
     } catch (e) {
-      debugPrint('_finalizeCapture failed: $e');
-      if (mounted) _stopGalleryLoading();
+      debugPrint('_moveCaptureToReserved failed: $e');
+      return false;
     }
   }
 
@@ -503,36 +579,61 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
 
     if (mounted) {
-      setState(() => _syncGalleryThumbFromLatest(preferCloud: true));
+      setState(() => _syncGalleryThumbFromLatest(preferCloud: false));
+    }
+  }
+
+  Future<void> _requestCameraPermission() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final granted = await _cameraService.requestCameraPermission();
+    if (granted) {
+      await _initCamera();
+      return;
+    }
+
+    final permissionState = await _cameraService.getCameraPermissionState();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _cameraPermissionState = permissionState;
+        _errorMessage = permissionState == CameraPermissionState.permanentlyDenied
+            ? '相机权限未开启，请在系统设置中允许'
+            : '需要相机权限才能拍摄';
+      });
     }
   }
 
   Widget _buildPreviewArea(BuildContext context) {
     if (_errorMessage != null) {
-      return _buildPlaceholder(message: _errorMessage!, showRetry: true);
+      return _buildPlaceholder(
+        message: _errorMessage!,
+        showPermissionActions: _cameraPermissionState != null,
+      );
     }
     if (_isLoading || !_cameraService.isInitialized) {
       return _buildPlaceholder(message: '正在启动相机...');
     }
 
-    final sensorAspect = _cameraService.previewAspectRatio;
     final preview = CameraPreviewView(
-      previewAspectRatio: sensorAspect,
-      fitContain: _aspectRatio.usesNativeSensorOutput,
-      fullScreen: _aspectRatio.usesFullScreenPreview,
+      key: const ValueKey('camera_preview_view'),
+      maskRatio: _aspectRatio.usesPreviewMask ? _aspectRatio.ratio : null,
       verticalAlignY: _previewVerticalAlignY,
     );
-    if (!_aspectRatio.usesPreviewMask) {
-      return preview;
-    }
-    return AspectRatioMask(
-      ratio: _aspectRatio.ratio,
-      frameAlignY: _previewVerticalAlignY,
-      child: preview,
-    );
+    return preview;
   }
 
-  Widget _buildPlaceholder({required String message, bool showRetry = false}) {
+  Widget _buildPlaceholder({
+    required String message,
+    bool showPermissionActions = false,
+  }) {
+    final needsSettings =
+        _cameraPermissionState == CameraPermissionState.permanentlyDenied;
+
     return Container(
       color: AppColors.bottomBarBg,
       child: Center(
@@ -549,9 +650,24 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                 color: AppColors.textHint,
               ),
             ),
-            if (showRetry) ...[
-              const SizedBox(height: 16),
-              TextButton(onPressed: _initCamera, child: const Text('重试')),
+            if (showPermissionActions) ...[
+              const SizedBox(height: 20),
+              if (!needsSettings)
+                FilledButton(
+                  onPressed: _requestCameraPermission,
+                  child: const Text('允许访问相机'),
+                ),
+              if (needsSettings) ...[
+                OutlinedButton(
+                  onPressed: _cameraService.openCameraSettings,
+                  child: const Text('前往系统设置'),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _initCamera,
+                  child: const Text('我已开启，重试'),
+                ),
+              ],
             ],
           ],
         ),
@@ -564,10 +680,10 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       case CameraPopupType.aspectRatio:
         return AspectRatioPopup(
           selectedIndex: _aspectRatioIndex,
-          onSelected: (i) async {
+          onSelected: (i) {
+            if (i == _aspectRatioIndex) return;
             setState(() => _aspectRatioIndex = i);
-            await _syncPreviewModeForAspect();
-            if (mounted) setState(() {});
+            unawaited(_syncPreviewModeForAspect());
           },
           onClose: _closePopup,
         );
@@ -607,6 +723,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       isPhotoMode: _isPhotoMode,
       galleryThumbLocalPath: _galleryThumbLocalPath,
       galleryThumbRemoteUrl: _galleryThumbRemoteUrl,
+      galleryThumbBytes: _galleryThumbBytes,
       galleryThumbPreferCloud: _galleryThumbPreferCloud,
       lastPhotoRevision: _lastPhotoRevision,
       isGalleryLoading: _isGalleryLoading,
@@ -667,8 +784,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
-  /// 9:16：预览铺满整屏，顶/底栏半透明叠在上面（与设计稿 camera.html 一致）
-  Widget _build916FullScreenLayout(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
+    final fullScreenPreview = _aspectRatio.usesFullScreenPreview;
     return Scaffold(
       backgroundColor: AppColors.cameraBg,
       body: Stack(
@@ -684,48 +802,15 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
               Expanded(child: _buildPreviewOverlays()),
               SafeArea(
                 top: false,
-                child: _buildBottomBar(transparentBackground: true),
+                child: _buildBottomBar(
+                  transparentBackground: fullScreenPreview,
+                ),
               ),
             ],
           ),
         ],
       ),
     );
-  }
-
-  Widget _buildStandardLayout(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bottomBarBg,
-      body: Column(
-        children: [
-          SafeArea(
-            bottom: false,
-            child: _buildTopBar(),
-          ),
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _buildPreviewArea(context),
-                _buildPreviewOverlays(),
-              ],
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: _buildBottomBar(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_aspectRatio.usesFullScreenPreview) {
-      return _build916FullScreenLayout(context);
-    }
-    return _buildStandardLayout(context);
   }
 }
 

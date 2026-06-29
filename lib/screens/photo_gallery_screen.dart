@@ -29,11 +29,11 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
   @override
   void initState() {
     super.initState();
-    _photos = List.of(widget.galleryService.photos);
     _loadGallery();
   }
 
   Future<void> _loadGallery() async {
+    await widget.galleryService.waitForPendingUploads();
     await widget.galleryService.refreshFromServer();
     if (!mounted) return;
     setState(() {
@@ -43,7 +43,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
   }
 
   void _syncPhotos() {
-    _photos = List.of(widget.galleryService.photos);
+    _photos = List.of(widget.galleryService.cloudGalleryPhotos);
     _selectedIds.removeWhere(
       (id) => !_photos.any((photo) => photo.id == id),
     );
@@ -314,7 +314,10 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      AppPhotoImage(photo: photo, fit: BoxFit.cover),
+                      AppPhotoImage(
+                        photo: photo,
+                        fit: BoxFit.cover,
+                      ),
                       if (_isBatchMode)
                         Container(
                           color: selected

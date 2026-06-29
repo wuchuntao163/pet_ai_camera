@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -33,11 +34,15 @@ class NativeCameraInitResult {
 
 class NativeCaptureResult {
   final String path;
+  final String? thumbnailPath;
+  final Uint8List? thumbnailBytes;
   final int? captureDurationMs;
   final bool directOutput;
 
   const NativeCaptureResult({
     required this.path,
+    this.thumbnailPath,
+    this.thumbnailBytes,
     this.captureDurationMs,
     this.directOutput = false,
   });
@@ -45,9 +50,24 @@ class NativeCaptureResult {
   factory NativeCaptureResult.fromMap(Map<dynamic, dynamic> map) {
     return NativeCaptureResult(
       path: map['path'] as String,
+      thumbnailPath: map['thumbnailPath'] as String?,
+      thumbnailBytes: _thumbnailBytesFromMap(map['thumbnailBytes']),
       captureDurationMs: (map['captureDurationMs'] as num?)?.toInt(),
       directOutput: map['directOutput'] as bool? ?? false,
     );
+  }
+
+  static Uint8List? _thumbnailBytesFromMap(dynamic value) {
+    if (value == null) return null;
+    if (value is Uint8List) return value;
+    if (value is TypedData) {
+      return Uint8List.view(
+        value.buffer,
+        value.offsetInBytes,
+        value.lengthInBytes,
+      );
+    }
+    return null;
   }
 }
 

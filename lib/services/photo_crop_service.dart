@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
@@ -36,8 +37,7 @@ class PhotoCropService {
     );
 
     try {
-      final job = params.nativeSensorOutput ? _cropNativeSensorJob : _cropJob;
-      return job(params);
+      return compute(_runCropJob, params);
     } catch (e) {
       debugPrint('PhotoCropService: crop failed: $e');
       return null;
@@ -73,11 +73,16 @@ class _CropJobParams {
   });
 }
 
+String? _runCropJob(_CropJobParams params) {
+  final job = params.nativeSensorOutput ? _cropNativeSensorJob : _cropJob;
+  return job(params);
+}
+
 img.Image _applyMirrorIfNeeded(img.Image image, bool mirrorFront) {
   return mirrorFront ? img.flipHorizontal(image) : image;
 }
 
-/// 3:4 原生：保留传感器 3:4 成片
+/// 传感器原生比例（3:4）：仅校正 EXIF 方向与前置镜像，不裁切
 String? _cropNativeSensorJob(_CropJobParams params) {
   try {
     final bytes = File(params.sourcePath).readAsBytesSync();
@@ -85,30 +90,10 @@ String? _cropNativeSensorJob(_CropJobParams params) {
     if (image == null) return null;
 
     image = img.bakeOrientation(image);
-
-    final imageAspect = image.width / image.height;
-    img.Image output;
-    if ((imageAspect - params.ratio).abs() < 0.02) {
-      output = image;
-    } else {
-      final crop = centerCropToRatio(
-        imageWidth: image.width,
-        imageHeight: image.height,
-        ratio: params.ratio,
-      );
-      output = img.copyCrop(
-        image,
-        x: crop.x,
-        y: crop.y,
-        width: crop.width,
-        height: crop.height,
-      );
-    }
-
-    output = _applyMirrorIfNeeded(output, params.mirrorFront);
+    image = _applyMirrorIfNeeded(image, params.mirrorFront);
 
     File(params.sourcePath).writeAsBytesSync(
-      img.encodeJpg(output, quality: 85),
+      img.encodeJpg(image, quality: 92),
     );
     return params.sourcePath;
   } catch (e) {

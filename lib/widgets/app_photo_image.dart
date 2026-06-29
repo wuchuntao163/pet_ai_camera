@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
 import '../models/app_photo.dart';
 
-/// 相册缩略图 / 大图（本地文件或网络 URL）
+/// 相册缩略图 / 大图（优先本地缓存，其次网络 URL）
 class AppPhotoImage extends StatelessWidget {
   final AppPhoto photo;
   final BoxFit fit;
@@ -22,10 +22,14 @@ class AppPhotoImage extends StatelessWidget {
       return Image.file(
         File(photo.localPath),
         fit: fit,
-        errorBuilder: (context, error, stackTrace) => _broken(),
+        errorBuilder: (context, error, stackTrace) => _remoteOrBroken(),
       );
     }
 
+    return _remoteOrBroken();
+  }
+
+  Widget _remoteOrBroken() {
     final url = photo.remoteUrl;
     if (url != null && url.isNotEmpty) {
       return Image.network(

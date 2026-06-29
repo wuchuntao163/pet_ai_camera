@@ -170,29 +170,34 @@ class _PetEmojiMenuState extends State<PetEmojiMenu> {
     final hasMoreSounds = widget.onMoreSounds != null;
     final listItemCount = widget.slots.length + (hasMoreSounds ? 1 : 0);
 
-    return SizedBox(
-      height: AppSizes.petMenuScrollHeight,
-      width: AppSizes.petMenuBtn,
-      child: SingleChildScrollView(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            minHeight: AppSizes.petMenuScrollHeight,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var index = 0; index < listItemCount; index++) ...[
-                if (index > 0) const SizedBox(height: AppSizes.petMenuItemGap),
-                _buildListItem(index, hasMoreSounds),
-              ],
-              if (listItemCount > 0)
-                const SizedBox(height: AppSizes.petMenuItemGap),
-              _collapseButton(onTap: () => setState(() => _expanded = false)),
-            ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: AppSizes.petMenuScrollHeight,
+          width: AppSizes.petMenuBtn,
+          child: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: AppSizes.petMenuScrollHeight,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var index = 0; index < listItemCount; index++) ...[
+                    if (index > 0)
+                      const SizedBox(height: AppSizes.petMenuItemGap),
+                    _buildListItem(index, hasMoreSounds),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: AppSizes.petMenuItemGap),
+        _collapseButton(onTap: () => setState(() => _expanded = false)),
+      ],
     );
   }
 

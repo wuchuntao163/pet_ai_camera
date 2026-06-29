@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -14,22 +15,35 @@ import '../models/app_photo.dart';
 /// 管理本应用拍摄的照片：本地存储 + 系统相册同步
 class PhotoGalleryService {
   static const _indexFileName = 'photos_index.json';
+  static const _cloudGalleryIndexFileName = 'cloud_gallery_index.json';
+  static const _cloudCacheFolder = 'cloud_cache';
   static const _albumFolder = 'Pictures/PetAiCamera';
 
   final List<AppPhoto> _photos = [];
+  List<AppPhoto> _cloudGalleryPhotos = [];
   bool _loaded = false;
   int _saveSeq = 0;
   Directory? _cachedPhotosDir;
+  Directory? _cloudCacheDir;
   ({String id, String path})? _readyCaptureSlot;
+  Future<void> _uploadTail = Future.value();
 
   List<AppPhoto> get photos => List.unmodifiable(_photos);
 
-  AppPhoto? get latestPhoto => _photos.isEmpty ? null : _photos.first;
+  /// 相册页展示：仅云端拍摄记录
+  List<AppPhoto> get cloudGalleryPhotos =>
+      List.unmodifiable(_cloudGalleryPhotos);
+
+  AppPhoto? get latestPhoto {
+    if (_cloudGalleryPhotos.isNotEmpty) return _cloudGalleryPhotos.first;
+    return _photos.isEmpty ? null : _photos.first;
+  }
 
   Future<void> init() async {
     if (_loaded) return;
     await _loadIndex();
     await _photosDirectory();
+    await _cloudCacheDirectory();
     _loaded = true;
     unawaited(warmCaptureSlot());
   }
@@ -106,23 +120,71 @@ class PhotoGalleryService {
   }
 
   /// 原生已写入 [localPath] 后登记索引（无文件拷贝）
-  Future<void> registerCapture({
+  Future<bool> registerCapture({
     required String id,
     required String localPath,
     int? soundEffectId,
+    bool upload = true,
+    bool syncToGallery = true,
   }) async {
     await init();
+    if (!await File(localPath).exists()) return false;
+
+    final existing = _photos.indexWhere((photo) => photo.id == id);
+    if (existing >= 0) {
+      _photos[existing] = _photos[existing].copyWith(localPath: localPath);
+    } else {
+      final photo = AppPhoto(
+        id: id,
+        localPath: localPath,
+        createdAtMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      _photos.insert(0, photo);
+    }
+    unawaited(_persistIndex());
+    if (syncToGallery) {
+      unawaited(syncToSystemGallery(id));
+    }
+    if (upload) {
+      return await uploadRecordForPhoto(id, soundEffectId: soundEffectId);
+    }
+    return true;
+  }
+
+  /// 等待进行中的 saveCameraRecord 上传完成（相册拉取前调用）
+  Future<void> waitForPendingUploads() async {
+    await _uploadTail;
+  }
+
+  Future<void> _upsertCloudGalleryPhoto(AppPhoto uploaded) async {
+    final recordId = uploaded.recordId;
+    final remoteUrl = uploaded.remoteUrl;
+    if (recordId == null || recordId <= 0) return;
+    if (remoteUrl == null || remoteUrl.isEmpty) return;
+
+    final cloudPhoto = AppPhoto(
+      id: 'record_$recordId',
+      localPath: '',
+      recordId: recordId,
+      remoteUrl: remoteUrl,
+      createdAtMs: uploaded.createdAtMs,
+    );
+    // 仅预缓存成片；相册列表以接口为准，不在此处写入展示列表
+    await _materializeCloudPhotoCache(
+      cloudPhoto,
+      localCapture: uploaded,
+    );
+  }
+
+  /// 成片落盘到最终路径后更新索引（不重复上传）
+  Future<void> updateCaptureLocalPath(String id, String localPath) async {
+    await init();
+    final index = _photos.indexWhere((photo) => photo.id == id);
+    if (index < 0) return;
     if (!await File(localPath).exists()) return;
 
-    final photo = AppPhoto(
-      id: id,
-      localPath: localPath,
-      createdAtMs: DateTime.now().millisecondsSinceEpoch,
-    );
-    _photos.insert(0, photo);
-    unawaited(_persistIndex());
-    unawaited(syncToSystemGallery(id));
-    unawaited(uploadRecordForPhoto(id, soundEffectId: soundEffectId));
+    _photos[index] = _photos[index].copyWith(localPath: localPath);
+    await _persistIndex();
   }
 
   /// 先保存到应用目录；[moveFile] 为 true 时移动文件（裁切后更快）
@@ -163,18 +225,39 @@ class PhotoGalleryService {
     return photo;
   }
 
-  /// 上传本地照片并调用 saveCameraRecord
-  Future<void> uploadRecordForPhoto(
+  /// 上传本地照片并调用 saveCameraRecord；成功则写入云端相册列表
+  Future<bool> uploadRecordForPhoto(
+    String photoId, {
+    int? soundEffectId,
+  }) async {
+    final completer = Completer<bool>();
+    _uploadTail = _uploadTail
+        .then((_) => _uploadRecordForPhotoImpl(
+              photoId,
+              soundEffectId: soundEffectId,
+            ))
+        .then((ok) {
+      if (!completer.isCompleted) completer.complete(ok);
+      return ok;
+    }).catchError((Object e, StackTrace stack) {
+      debugPrint('PhotoGalleryService: uploadRecordForPhoto error: $e');
+      if (!completer.isCompleted) completer.complete(false);
+      return false;
+    });
+    return completer.future;
+  }
+
+  Future<bool> _uploadRecordForPhotoImpl(
     String photoId, {
     int? soundEffectId,
   }) async {
     await init();
     final index = _photos.indexWhere((photo) => photo.id == photoId);
-    if (index < 0) return;
+    if (index < 0) return false;
 
     final photo = _photos[index];
-    if (photo.recordId != null) return;
-    if (!photo.hasLocalFile) return;
+    if (photo.recordId != null) return true;
+    if (!photo.hasLocalFile) return false;
 
     final result = await CameraRecordStore.instance.saveRecord(
       localFilePath: photo.localPath,
@@ -185,20 +268,30 @@ class PhotoGalleryService {
       debugPrint(
         'PhotoGalleryService: uploadRecordForPhoto failed: ${result.msg}',
       );
-      return;
+      return false;
     }
 
-    _photos[index] = photo.copyWith(
+    final updated = photo.copyWith(
       recordId: result.recordId,
       remoteUrl: result.fileUrl,
     );
+    _photos[index] = updated;
     await _persistIndex();
+    await _upsertCloudGalleryPhoto(updated);
+    return true;
   }
 
-  /// 从接口拉取拍摄记录（先清除本地照片，仅展示云端列表）
+  /// 从接口拉取拍摄记录（接口为唯一数据源），并缓存图片到本地
   Future<void> refreshFromServer({int recordType = 1}) async {
     await init();
-    await clearLocalPhotos();
+
+    final previousByRecordId = <int, AppPhoto>{};
+    for (final photo in _cloudGalleryPhotos) {
+      final recordId = photo.serverRecordId;
+      if (recordId != null && recordId > 0) {
+        previousByRecordId[recordId] = photo;
+      }
+    }
 
     try {
       await CameraRecordStore.instance.fetchList(recordType: recordType);
@@ -208,7 +301,8 @@ class PhotoGalleryService {
     }
 
     final records = CameraRecordStore.instance.records;
-    final merged = <AppPhoto>[];
+    final fromApi = <AppPhoto>[];
+    final apiRecordIds = <int>{};
 
     for (final record in records) {
       if (_asInt(record['is_show']) == 0) continue;
@@ -219,7 +313,8 @@ class PhotoGalleryService {
       final fileUrl = record['file_url']?.toString() ?? '';
       if (fileUrl.isEmpty) continue;
 
-      merged.add(
+      apiRecordIds.add(recordId);
+      fromApi.add(
         AppPhoto(
           id: 'record_$recordId',
           localPath: '',
@@ -230,11 +325,21 @@ class PhotoGalleryService {
       );
     }
 
-    merged.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
-    _photos
-      ..clear()
-      ..addAll(merged);
-    await _persistIndex();
+    fromApi.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
+
+    final cached = await Future.wait(
+      fromApi.map(
+        (photo) => _materializeCloudPhotoCache(
+          photo,
+          previous: previousByRecordId[photo.serverRecordId],
+          localCapture: _findLocalPhotoByRecordId(photo.serverRecordId),
+        ),
+      ),
+    );
+
+    await _pruneCloudCache(apiRecordIds);
+    _cloudGalleryPhotos = cached;
+    await _persistCloudGalleryIndex();
   }
 
   /// 删除应用内本地照片文件与索引（不影响云端记录）
@@ -319,12 +424,13 @@ class PhotoGalleryService {
 
   Future<({bool ok, String msg})> deletePhoto(String id) async {
     await init();
-    final index = _photos.indexWhere((photo) => photo.id == id);
-    if (index < 0) {
+    final cloudIndex =
+        _cloudGalleryPhotos.indexWhere((photo) => photo.id == id);
+    if (cloudIndex < 0) {
       return (ok: false, msg: '照片不存在');
     }
 
-    final photo = _photos[index];
+    final photo = _cloudGalleryPhotos[cloudIndex];
     final recordId = await _resolveDeleteRecordId(photo);
     var msg = '';
 
@@ -336,10 +442,13 @@ class PhotoGalleryService {
       msg = result.msg;
     }
 
-    await _deletePhotoLocalOnly(photo);
-
-    _photos.removeAt(index);
-    await _persistIndex();
+    _cloudGalleryPhotos.removeAt(cloudIndex);
+    _removeLocalPhotosLinkedTo(photo);
+    final cacheRecordId = photo.serverRecordId;
+    if (cacheRecordId != null && cacheRecordId > 0) {
+      await _deleteCacheForRecord(cacheRecordId);
+    }
+    await _persistCloudGalleryIndex();
     return (ok: true, msg: msg);
   }
 
@@ -358,10 +467,10 @@ class PhotoGalleryService {
     return (deleted: deleted, msg: msg);
   }
 
-  /// 删除全部照片：先调 deleteAllCameraRecords，再清本地
+  /// 删除全部照片：先调 deleteAllCameraRecords，再清云端列表与关联本地缓存
   Future<({int deleted, String msg})> deleteAllPhotos() async {
     await init();
-    final count = _photos.length;
+    final count = _cloudGalleryPhotos.length;
     if (count == 0) {
       return (deleted: 0, msg: '');
     }
@@ -371,12 +480,27 @@ class PhotoGalleryService {
       return (deleted: 0, msg: result.msg);
     }
 
-    for (final photo in List<AppPhoto>.from(_photos)) {
-      await _deletePhotoLocalOnly(photo);
+    for (final photo in List<AppPhoto>.from(_cloudGalleryPhotos)) {
+      _removeLocalPhotosLinkedTo(photo);
     }
-    _photos.clear();
-    await _persistIndex();
+    _cloudGalleryPhotos.clear();
+    await _clearCloudCache();
+    await _persistCloudGalleryIndex();
     return (deleted: count, msg: result.msg);
+  }
+
+  void _removeLocalPhotosLinkedTo(AppPhoto cloudPhoto) {
+    final recordId = cloudPhoto.serverRecordId;
+    final linked = recordId != null
+        ? _photos.where((photo) => photo.serverRecordId == recordId).toList()
+        : <AppPhoto>[];
+    if (linked.isEmpty && cloudPhoto.hasLocalFile) {
+      linked.add(cloudPhoto);
+    }
+    for (final photo in linked) {
+      unawaited(_deletePhotoLocalOnly(photo));
+      _photos.removeWhere((item) => item.id == photo.id);
+    }
   }
 
   Future<void> _deletePhotoLocalOnly(AppPhoto photo) async {
@@ -395,6 +519,155 @@ class PhotoGalleryService {
       }
     } catch (e) {
       debugPrint('PhotoGalleryService: delete local file failed: $e');
+    }
+  }
+
+  Future<Directory> _cloudCacheDirectory() async {
+    if (_cloudCacheDir != null && await _cloudCacheDir!.exists()) {
+      return _cloudCacheDir!;
+    }
+    final base = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(base.path, _cloudCacheFolder));
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    _cloudCacheDir = dir;
+    return dir;
+  }
+
+  Future<String> _cachePathForRecord(int recordId) async {
+    final dir = await _cloudCacheDirectory();
+    return p.join(dir.path, 'record_$recordId.jpg');
+  }
+
+  AppPhoto? _findLocalPhotoByRecordId(int? recordId) {
+    if (recordId == null || recordId <= 0) return null;
+    for (final photo in _photos) {
+      if (photo.recordId == recordId) return photo;
+    }
+    return null;
+  }
+
+  Future<AppPhoto> _materializeCloudPhotoCache(
+    AppPhoto photo, {
+    AppPhoto? previous,
+    AppPhoto? localCapture,
+  }) async {
+    final recordId = photo.serverRecordId;
+    if (recordId == null || recordId <= 0) return photo;
+
+    final cachePath = await _cachePathForRecord(recordId);
+    final cacheFile = File(cachePath);
+    if (await cacheFile.exists() && await cacheFile.length() > 0) {
+      return photo.copyWith(localPath: cachePath);
+    }
+
+    if (previous != null && previous.hasLocalFile) {
+      final previousPath = previous.localPath;
+      if (previousPath != cachePath) {
+        final previousFile = File(previousPath);
+        if (await previousFile.exists()) {
+          final copied = await _copyFileToCache(previousFile, cachePath);
+          if (copied) return photo.copyWith(localPath: cachePath);
+        }
+      } else if (await cacheFile.exists()) {
+        return photo.copyWith(localPath: cachePath);
+      }
+    }
+
+    if (localCapture != null && localCapture.hasLocalFile) {
+      final localFile = File(localCapture.localPath);
+      if (await localFile.exists()) {
+        final copied = await _copyFileToCache(localFile, cachePath);
+        if (copied) return photo.copyWith(localPath: cachePath);
+      }
+    }
+
+    final url = photo.remoteUrl;
+    if (url != null && url.isNotEmpty) {
+      final downloaded = await _downloadToCache(url, cachePath);
+      if (downloaded) return photo.copyWith(localPath: cachePath);
+    }
+
+    return photo;
+  }
+
+  Future<bool> _copyFileToCache(File source, String cachePath) async {
+    try {
+      final dest = File(cachePath);
+      await dest.parent.create(recursive: true);
+      if (source.path == cachePath) return true;
+      await source.copy(cachePath);
+      return await dest.exists() && await dest.length() > 0;
+    } catch (e) {
+      debugPrint('PhotoGalleryService: copy cache failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _downloadToCache(String url, String cachePath) async {
+    try {
+      final dest = File(cachePath);
+      await dest.parent.create(recursive: true);
+      final dio = Dio();
+      await dio.download(url, cachePath);
+      return await dest.exists() && await dest.length() > 0;
+    } catch (e) {
+      debugPrint('PhotoGalleryService: download cache failed: $e');
+      return false;
+    }
+  }
+
+  Future<void> _deleteCacheForRecord(int recordId) async {
+    try {
+      final cachePath = await _cachePathForRecord(recordId);
+      final file = File(cachePath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      debugPrint('PhotoGalleryService: delete cache failed: $e');
+    }
+  }
+
+  Future<void> _pruneCloudCache(Set<int> activeRecordIds) async {
+    try {
+      final dir = await _cloudCacheDirectory();
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        final name = p.basenameWithoutExtension(entity.path);
+        if (!name.startsWith('record_')) continue;
+        final recordId = int.tryParse(name.substring('record_'.length));
+        if (recordId == null || !activeRecordIds.contains(recordId)) {
+          await entity.delete();
+        }
+      }
+    } catch (e) {
+      debugPrint('PhotoGalleryService: prune cache failed: $e');
+    }
+  }
+
+  Future<void> _clearCloudCache() async {
+    try {
+      final dir = await _cloudCacheDirectory();
+      await for (final entity in dir.list()) {
+        if (entity is File) {
+          await entity.delete();
+        }
+      }
+    } catch (e) {
+      debugPrint('PhotoGalleryService: clear cloud cache failed: $e');
+    }
+  }
+
+  Future<void> _persistCloudGalleryIndex() async {
+    try {
+      final base = await getApplicationDocumentsDirectory();
+      final indexFile = File(p.join(base.path, _cloudGalleryIndexFileName));
+      final jsonList = _cloudGalleryPhotos.map((photo) => photo.toJson()).toList();
+      await indexFile.writeAsString(jsonEncode(jsonList));
+    } catch (e) {
+      debugPrint('PhotoGalleryService: persist cloud gallery index failed: $e');
     }
   }
 

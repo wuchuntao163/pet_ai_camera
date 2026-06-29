@@ -6,8 +6,14 @@ import '../native_camera/native_camera_channel.dart';
 
 class CapturePhotoResult {
   final String fullPath;
+  final String? thumbnailPath;
+  final Uint8List? thumbnailBytes;
 
-  const CapturePhotoResult({required this.fullPath});
+  const CapturePhotoResult({
+    required this.fullPath,
+    this.thumbnailPath,
+    this.thumbnailBytes,
+  });
 }
 
 /// 原生相机服务（Android CameraX / iOS AVFoundation）
@@ -33,6 +39,7 @@ class CameraService {
     await NativeCameraChannel.dispose();
     final result = await NativeCameraChannel.initialize();
     _applyInitResult(result);
+    _nativePreviewContain = true;
     _initialized = true;
     await setZoomLevel(_baselineOneX);
     debugPrint(
@@ -46,7 +53,6 @@ class CameraService {
     final result = await NativeCameraChannel.switchCamera();
     _applyInitResult(result);
     _lastAppliedFlash = null;
-    await setZoomLevel(_baselineOneX);
   }
 
   Future<bool> applyToolbarFlash(FlashToolbarState state) async {
@@ -85,7 +91,11 @@ class CameraService {
         'direct=${result.directOutput} '
         '(channel=${sw.elapsedMilliseconds}ms)',
       );
-      return CapturePhotoResult(fullPath: result.path);
+      return CapturePhotoResult(
+        fullPath: result.path,
+        thumbnailPath: result.thumbnailPath,
+        thumbnailBytes: result.thumbnailBytes,
+      );
     } catch (e) {
       debugPrint('takePicture failed: $e');
       return null;
@@ -103,11 +113,15 @@ class CameraService {
     }
   }
 
+  bool _nativePreviewContain = true;
+
   Future<void> setPreviewMode({
     required bool nativeSensorContain,
     double? viewportAspect,
   }) async {
     if (!_initialized) return;
+    if (nativeSensorContain == _nativePreviewContain) return;
+    _nativePreviewContain = nativeSensorContain;
     try {
       final result = await NativeCameraChannel.setPreviewMode(
         contain: nativeSensorContain,
@@ -146,15 +160,36 @@ class CameraService {
   }
 
   Future<bool> _ensurePermission() async {
-    var status = await Permission.camera.status;
-    if (status.isGranted) return true;
-    status = await Permission.camera.request();
-    if (status.isGranted) return true;
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
-    }
-    return false;
+    final state = await getCameraPermissionState();
+    if (state == CameraPermissionState.granted) return true;
+    if (state == CameraPermissionState.permanentlyDenied) return false;
+    final status = await Permission.camera.request();
+    return status.isGranted;
   }
+
+  /// 当前相机权限状态（不触发跳转系统设置）
+  Future<CameraPermissionState> getCameraPermissionState() async {
+    final status = await Permission.camera.status;
+    if (status.isGranted) return CameraPermissionState.granted;
+    if (status.isPermanentlyDenied) {
+      return CameraPermissionState.permanentlyDenied;
+    }
+    return CameraPermissionState.notDetermined;
+  }
+
+  /// 弹出系统授权框（首次或未拒绝时）
+  Future<bool> requestCameraPermission() async {
+    final status = await Permission.camera.request();
+    return status.isGranted;
+  }
+
+  Future<void> openCameraSettings() => openAppSettings();
+}
+
+enum CameraPermissionState {
+  granted,
+  notDetermined,
+  permanentlyDenied,
 }
 
 class CameraPermissionException implements Exception {}

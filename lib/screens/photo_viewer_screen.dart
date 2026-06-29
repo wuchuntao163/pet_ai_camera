@@ -31,7 +31,7 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _photos = List.of(widget.galleryService.photos);
+    _photos = List.of(widget.galleryService.cloudGalleryPhotos);
     _currentIndex = widget.initialIndex.clamp(0, _photos.length - 1);
     _pageController = PageController(initialPage: _currentIndex);
   }
@@ -164,7 +164,10 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
             child: InteractiveViewer(
               minScale: 0.5,
               maxScale: 4,
-              child: AppPhotoImage(photo: _photos[index], fit: BoxFit.contain),
+              child: AppPhotoImage(
+                photo: _photos[index],
+                fit: BoxFit.contain,
+              ),
             ),
           );
         },

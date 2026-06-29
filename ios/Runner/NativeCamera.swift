@@ -8,6 +8,7 @@ final class NativeCameraController: NSObject {
 
   private let session = AVCaptureSession()
   private let sessionQueue = DispatchQueue(label: "native.camera.session")
+  private let processingQueue = DispatchQueue(label: "native.camera.processing")
   private let photoOutput = AVCapturePhotoOutput()
 
   private var videoInput: AVCaptureDeviceInput?
@@ -25,6 +26,8 @@ final class NativeCameraController: NSObject {
   private var previewFitContain = true
 
   private var captureCompletion: ((Result<[String: Any], Error>) -> Void)?
+  private var pendingCrop: [String: Any]?
+  private var captureStartedAt: CFAbsoluteTime = 0
 
   func attachPreview(_ view: NativeCameraPreviewView) {
     previewView = view
@@ -102,15 +105,16 @@ final class NativeCameraController: NSObject {
   func switchCamera(completion: @escaping (Result<[String: Any], Error>) -> Void) {
     sessionQueue.async {
       do {
-        self.currentPosition = self.currentPosition == .back ? .front : .back
-        try self.configureSession()
-        if !self.session.isRunning {
-          self.session.startRunning()
-        }
+        self.session.beginConfiguration()
+        let newPosition: AVCaptureDevice.Position =
+          self.currentPosition == .back ? .front : .back
+        try self.switchToPosition(newPosition)
+        self.session.commitConfiguration()
         DispatchQueue.main.async {
           completion(.success(self.stateMap()))
         }
       } catch {
+        self.session.commitConfiguration()
         DispatchQueue.main.async {
           completion(.failure(error))
         }
@@ -178,12 +182,14 @@ final class NativeCameraController: NSObject {
     }
   }
 
-  func takePicture(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+  func takePicture(crop: [String: Any]?, completion: @escaping (Result<[String: Any], Error>) -> Void) {
     sessionQueue.async {
       let settings = AVCapturePhotoSettings()
       if self.videoInput?.device.hasFlash == true && !self.torchEnabled {
         settings.flashMode = self.flashMode
       }
+      self.pendingCrop = crop
+      self.captureStartedAt = CFAbsoluteTimeGetCurrent()
       self.captureCompletion = completion
       self.photoOutput.capturePhoto(with: settings, delegate: self)
     }
@@ -200,32 +206,61 @@ final class NativeCameraController: NSObject {
       session.removeOutput(output)
     }
 
-    guard let device = bestDevice(for: currentPosition) else {
-      session.commitConfiguration()
-      throw NSError(domain: "NativeCamera", code: -1, userInfo: [NSLocalizedDescriptionKey: "No camera"])
+    try switchToPosition(currentPosition, reconfigureOutputs: true)
+    session.commitConfiguration()
+  }
+
+  /// 仅切换摄像头输入，保留 photoOutput，避免前后摄切换时全量重建 session
+  private func switchToPosition(
+    _ position: AVCaptureDevice.Position,
+    reconfigureOutputs: Bool = false
+  ) throws {
+    if let existingInput = videoInput {
+      session.removeInput(existingInput)
+    }
+
+    currentPosition = position
+
+    guard let device = bestDevice(for: position) else {
+      throw NSError(
+        domain: "NativeCamera",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "No camera"]
+      )
     }
 
     let input = try AVCaptureDeviceInput(device: device)
     guard session.canAddInput(input) else {
-      session.commitConfiguration()
-      throw NSError(domain: "NativeCamera", code: -2, userInfo: [NSLocalizedDescriptionKey: "Cannot add input"])
+      throw NSError(
+        domain: "NativeCamera",
+        code: -2,
+        userInfo: [NSLocalizedDescriptionKey: "Cannot add input"]
+      )
     }
     session.addInput(input)
     videoInput = input
 
-    if session.canAddOutput(photoOutput) {
-      session.addOutput(photoOutput)
-      photoOutput.isHighResolutionCaptureEnabled = false
+    if reconfigureOutputs || !session.outputs.contains(photoOutput) {
+      if session.canAddOutput(photoOutput) {
+        session.addOutput(photoOutput)
+        photoOutput.isHighResolutionCaptureEnabled = false
+      }
     }
 
+    applyDeviceSettings(device)
+  }
+
+  private func applyDeviceSettings(_ device: AVCaptureDevice) {
     minZoom = Double(device.minAvailableVideoZoomFactor)
     maxZoom = Double(device.maxAvailableVideoZoomFactor)
     baselineOneX = minZoom < 1.0 ? minZoom : 1.0
     currentZoom = CGFloat(baselineOneX)
 
-    try device.lockForConfiguration()
-    device.videoZoomFactor = currentZoom
-    device.unlockForConfiguration()
+    do {
+      try device.lockForConfiguration()
+      device.videoZoomFactor = currentZoom
+      device.unlockForConfiguration()
+    } catch {}
 
     let dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
     if dims.height > 0 {
@@ -233,8 +268,6 @@ final class NativeCameraController: NSObject {
       let h = Double(max(dims.width, dims.height))
       previewAspectRatio = w / h
     }
-
-    session.commitConfiguration()
   }
 
   private func bestDevice(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
@@ -249,7 +282,7 @@ final class NativeCameraController: NSObject {
     return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
   }
 
-  private func stateMap() -> [String: Any] {
+  func stateMap() -> [String: Any] {
     [
       "baselineOneX": baselineOneX,
       "minZoom": minZoom,
@@ -257,18 +290,6 @@ final class NativeCameraController: NSObject {
       "previewAspectRatio": previewAspectRatio,
       "isBackCamera": currentPosition == .back,
     ]
-  }
-
-  private func writeThumbnail(from data: Data, to url: URL) throws {
-    guard let image = UIImage(data: data) else { return }
-    let size = CGSize(width: 160, height: 160)
-    UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
-    image.draw(in: CGRect(origin: .zero, size: size))
-    let thumb = UIGraphicsGetImageFromCurrentImageContext()
-    UIGraphicsEndImageContext()
-    if let jpeg = thumb?.jpegData(compressionQuality: 0.75) {
-      try jpeg.write(to: url)
-    }
   }
 }
 
@@ -295,22 +316,56 @@ extension NativeCameraController: AVCapturePhotoCaptureDelegate {
       return
     }
 
-    let fileName = "capture_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
-    let photoURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-    let thumbURL = FileManager.default.temporaryDirectory.appendingPathComponent("thumb_\(fileName)")
+    let crop = pendingCrop
+    pendingCrop = nil
+    let cropParams = CropParams.from(crop)
+    let directOutput = cropParams?.directOutput ?? false
+    let mirrorFront = cropParams?.mirrorFront ?? false
+    let outputPath = crop?["outputPath"] as? String
 
-    do {
-      try data.write(to: photoURL)
-      try writeThumbnail(from: data, to: thumbURL)
-      DispatchQueue.main.async {
-        completion?(.success([
-          "path": photoURL.path,
-          "thumbnailPath": thumbURL.path,
-        ]))
-      }
-    } catch {
-      DispatchQueue.main.async {
-        completion?(.failure(error))
+    let fileName = "capture_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+    let photoURL: URL
+    if let outputPath, !outputPath.isEmpty {
+      photoURL = URL(fileURLWithPath: outputPath)
+      try? FileManager.default.createDirectory(
+        at: photoURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+    } else {
+      photoURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+    }
+
+    let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - captureStartedAt) * 1000)
+    let completionHandler = completion
+
+    processingQueue.async {
+      autoreleasepool {
+        do {
+          try data.write(to: photoURL)
+
+          if directOutput {
+            _ = PhotoCropHelper.normalizeDirectOutput(
+              url: photoURL,
+              mirrorFront: mirrorFront
+            )
+          }
+
+          var result: [String: Any] = [
+            "path": photoURL.path,
+            "captureDurationMs": elapsedMs,
+            "directOutput": directOutput,
+          ]
+          if let thumbData = PhotoCropHelper.makeThumbnailJPEG(url: photoURL) {
+            result["thumbnailBytes"] = FlutterStandardTypedData(bytes: thumbData)
+          }
+          DispatchQueue.main.async {
+            completionHandler?(.success(result))
+          }
+        } catch {
+          DispatchQueue.main.async {
+            completionHandler?(.failure(error))
+          }
+        }
       }
     }
   }
@@ -429,7 +484,12 @@ final class NativeCameraPlugin: NSObject, FlutterPlugin {
       controller.playShutterSound()
       result(nil)
     case "takePicture":
-      controller.takePicture { r in
+      let args = call.arguments as? [String: Any]
+      let crop = args?["crop"] as? [String: Any]
+      if crop?["playShutter"] as? Bool == true {
+        controller.playShutterSound()
+      }
+      controller.takePicture(crop: crop) { r in
         switch r {
         case .success(let map): result(map)
         case .failure(let error): result(FlutterError(code: "CAPTURE_FAILED", message: error.localizedDescription, details: nil))
