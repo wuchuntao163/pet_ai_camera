@@ -2,12 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../services/file_upload_service.dart';
+import '../services/pet_text_service.dart';
+
 /// AI 趣味文案导出卡片（相框：内边距 + 原图完整显示 + 底色文案区）
 class PetCopyExportCard extends StatefulWidget {
   final String? localPath;
   final String? remoteUrl;
   final String text;
   final Color textBackgroundColor;
+  final Color textColor;
   final double width;
   final bool roundCorners;
 
@@ -17,6 +21,7 @@ class PetCopyExportCard extends StatefulWidget {
     this.remoteUrl,
     required this.text,
     required this.textBackgroundColor,
+    this.textColor = kPetCopyTextColor,
     required this.width,
     this.roundCorners = true,
   });
@@ -91,9 +96,16 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
   }
 
   NetworkImage? _networkProvider(String? url) {
-    final value = url?.trim();
+    final value = _resolvedRemoteUrl(raw: url);
     if (value == null || value.isEmpty) return null;
     return NetworkImage(value);
+  }
+
+  String? _resolvedRemoteUrl({String? raw}) {
+    final value = (raw ?? widget.remoteUrl)?.trim();
+    if (value == null || value.isEmpty) return null;
+    if (value.startsWith('http')) return value;
+    return FileUploadService.resolveUrl(value);
   }
 
   @override
@@ -145,8 +157,8 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
                         textAlign: TextAlign.center,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF1F2937),
+                        style: TextStyle(
+                          color: widget.textColor,
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           height: 1.35,
@@ -190,7 +202,7 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
   }
 
   Widget _networkOrPlaceholder(double photoWidth, double photoHeight) {
-    final url = widget.remoteUrl?.trim();
+    final url = _resolvedRemoteUrl();
     if (url != null && url.isNotEmpty) {
       return Image.network(
         url,

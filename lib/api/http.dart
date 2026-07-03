@@ -541,6 +541,7 @@ bool _shouldLogApiPath(String path) {
     ApiPaths.addCustomSoundEffect,
     ApiPaths.uploadLocalImage,
     ApiPaths.upload,
+    ApiPaths.generatePetText,
   ];
   return allowed.any(path.contains);
 }

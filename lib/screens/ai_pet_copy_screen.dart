@@ -14,6 +14,7 @@ import '../models/app_photo.dart';
 import '../services/pet_text_service.dart';
 import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
+import '../services/file_upload_service.dart';
 import '../widgets/pet_copy_export_card.dart';
 import '../widgets/toast_message.dart';
 
@@ -44,6 +45,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
 
   bool _loading = true;
   bool _regenerating = false;
+  bool _exportSquareCorners = false;
   String? _errorMessage;
   PetTextResult? _result;
   String? _resolvedImageUrl;
@@ -72,13 +74,10 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
     });
 
     try {
-      final remote = _resolvedImageUrl ?? widget.photo.remoteUrl;
-      final local = _resolvedImageUrl != null
-          ? null
-          : (widget.photo.hasLocalFile ? widget.photo.localPath : null);
+      final local = widget.photo.hasLocalFile ? widget.photo.localPath : null;
       final response = await PetTextService.generate(
-        imageUrl: remote,
-        localPath: local,
+        imageUrl: _resolvedImageUrl ?? widget.photo.remoteUrl,
+        localPath: _resolvedImageUrl == null ? local : null,
       );
       if (!mounted) return;
       setState(() {
@@ -94,12 +93,14 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
         _regenerating = false;
         _errorMessage = e.message;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _regenerating = false;
-        _errorMessage = '生成失败，请重试';
+        _errorMessage = e is ApiException
+            ? e.message
+            : (e is StateError ? e.message : '生成失败，请重试');
       });
     }
   }
@@ -111,15 +112,40 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
   }
 
   Future<Uint8List?> _captureCardPng() async {
+    setState(() => _exportSquareCorners = true);
     await WidgetsBinding.instance.endOfFrame;
     await Future.delayed(const Duration(milliseconds: 100));
-    final boundary = _exportKey.currentContext?.findRenderObject()
-        as RenderRepaintBoundary?;
-    if (boundary == null) return null;
-    final image = await boundary.toImage(pixelRatio: 3.0);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    image.dispose();
-    return byteData?.buffer.asUint8List();
+    try {
+      final boundary = _exportKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      return byteData?.buffer.asUint8List();
+    } finally {
+      if (mounted) {
+        setState(() => _exportSquareCorners = false);
+      }
+    }
+  }
+
+  String? _displayLocalPath() {
+    // 生成成功后优先用已上传 URL 展示，避免 release 下本地缓存路径失效
+    if (_resolvedImageUrl != null && _resolvedImageUrl!.isNotEmpty) {
+      return null;
+    }
+    final path = widget.photo.localPath.trim();
+    if (path.isEmpty || !File(path).existsSync()) return null;
+    return path;
+  }
+
+  String? _displayRemoteUrl() {
+    final raw = _resolvedImageUrl ?? widget.photo.remoteUrl;
+    if (raw == null || raw.trim().isEmpty) return null;
+    final value = raw.trim();
+    if (value.startsWith('http')) return value;
+    return FileUploadService.resolveUrl(value);
   }
 
   Future<String?> _writeTempPng(Uint8List bytes) async {
@@ -288,39 +314,16 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
           ),
           child: Column(
             children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  PetCopyExportCard(
-                    localPath: widget.photo.hasLocalFile
-                        ? widget.photo.localPath
-                        : null,
-                    remoteUrl: widget.photo.remoteUrl,
-                    text: result.text,
-                    textBackgroundColor: result.backgroundColor,
-                    width: width,
-                  ),
-                  IgnorePointer(
-                    child: Positioned(
-                      left: -10000,
-                      top: 0,
-                      width: width,
-                      child: RepaintBoundary(
-                        key: _exportKey,
-                        child: PetCopyExportCard(
-                          localPath: widget.photo.hasLocalFile
-                              ? widget.photo.localPath
-                              : null,
-                          remoteUrl: widget.photo.remoteUrl,
-                          text: result.text,
-                          textBackgroundColor: result.backgroundColor,
-                          width: width,
-                          roundCorners: false,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+              RepaintBoundary(
+                key: _exportKey,
+                child: PetCopyExportCard(
+                  localPath: _displayLocalPath(),
+                  remoteUrl: _displayRemoteUrl(),
+                  text: result.text,
+                  textBackgroundColor: result.backgroundColor,
+                  width: width,
+                  roundCorners: !_exportSquareCorners,
+                ),
               ),
               SizedBox(height: _quoteBoxGap),
               Container(
