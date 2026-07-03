@@ -36,12 +36,12 @@ class FileUploadService {
     ApiResponse<dynamic> res;
     try {
       if (kDebugMode) {
-        debugPrint(
-          '[FileUploadService] 开始上传 → $uploadPath\n'
-          '  本地文件: $localPath\n'
-          '  file 字段: ${p.basename(localPath)}\n'
-          '  参数: $fields',
-        );
+        // debugPrint(
+        //   '[FileUploadService] 开始上传 → $uploadPath\n'
+        //   '  本地文件: $localPath\n'
+        //   '  file 字段: ${p.basename(localPath)}\n'
+        //   '  参数: $fields',
+        // );
       }
       res = await Api.upload(
         uploadPath,

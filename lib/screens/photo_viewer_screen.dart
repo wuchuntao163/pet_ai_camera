@@ -1,10 +1,13 @@
-import 'package:flutter/material.dart';import 'package:go_router/go_router.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../constants/app_colors.dart';
-import '../models/app_photo.dart';
 import '../constants/app_images.dart';
+import '../models/app_photo.dart';
+import '../router/app_routes.dart';
 import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
+import '../widgets/ai_fun_copy_button.dart';
 import '../widgets/app_photo_image.dart';
 import '../widgets/toast_message.dart';
 
@@ -40,6 +43,11 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
   void dispose() {
     _pageController.dispose();
     super.dispose();
+  }
+
+  void _onAiFunCopy() {
+    if (_photos.isEmpty) return;
+    context.push(AppRoutes.aiPetCopy, extra: _photos[_currentIndex]);
   }
 
   Future<void> _confirmDelete() async {
@@ -124,6 +132,8 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -154,22 +164,35 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
           ),
         ],
       ),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: _photos.length,
-        onPageChanged: (index) => setState(() => _currentIndex = index),
-        itemBuilder: (context, index) {
-          return Center(
-            child: InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4,
-              child: AppPhotoImage(
-                photo: _photos[index],
-                fit: BoxFit.contain,
-              ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            itemCount: _photos.length,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemBuilder: (context, index) {
+              return Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4,
+                  child: AppPhotoImage(
+                    photo: _photos[index],
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              );
+            },
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: bottomInset + 20,
+            child: Center(
+              child: AiFunCopyButton(onTap: _onAiFunCopy),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }

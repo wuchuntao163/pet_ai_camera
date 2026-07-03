@@ -11,16 +11,20 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../data/camera_record_store.dart';
 import '../models/app_photo.dart';
+import '../native_gallery/gallery_media_channel.dart';
 
 /// 管理本应用拍摄的照片：本地存储 + 系统相册同步
 class PhotoGalleryService {
   static const _indexFileName = 'photos_index.json';
   static const _cloudGalleryIndexFileName = 'cloud_gallery_index.json';
+  static const _galleryAssetMapFileName = 'gallery_asset_map.json';
   static const _cloudCacheFolder = 'cloud_cache';
   static const _albumFolder = 'Pictures/PetAiCamera';
 
   final List<AppPhoto> _photos = [];
   List<AppPhoto> _cloudGalleryPhotos = [];
+  final Map<int, String> _galleryAssetByRecordId = {};
+  final Map<int, String> _captureIdByRecordId = {};
   bool _loaded = false;
   int _saveSeq = 0;
   Directory? _cachedPhotosDir;
@@ -42,6 +46,8 @@ class PhotoGalleryService {
   Future<void> init() async {
     if (_loaded) return;
     await _loadIndex();
+    await _loadGalleryAssetMap();
+    _rebuildGalleryAssetMapFromPhotos();
     await _photosDirectory();
     await _cloudCacheDirectory();
     _loaded = true;
@@ -276,6 +282,10 @@ class PhotoGalleryService {
       remoteUrl: result.fileUrl,
     );
     _photos[index] = updated;
+    if (updated.galleryAssetId != null) {
+      _rememberGalleryAsset(result.recordId!, updated.galleryAssetId!);
+    }
+    _rememberCaptureId(result.recordId!, photoId);
     await _persistIndex();
     await _upsertCloudGalleryPhoto(updated);
     return true;
@@ -313,12 +323,14 @@ class PhotoGalleryService {
       if (fileUrl.isEmpty) continue;
 
       apiRecordIds.add(recordId);
+      final galleryAssetId = _galleryAssetIdForRecord(recordId);
       fromApi.add(
         AppPhoto(
           id: 'record_$recordId',
           localPath: '',
           recordId: recordId,
           remoteUrl: fileUrl,
+          galleryAssetId: galleryAssetId,
           createdAtMs: _parseCreatedAt(record['created_at']) ?? 0,
         ),
       );
@@ -383,6 +395,11 @@ class PhotoGalleryService {
     if (galleryAssetId == null) return;
 
     _photos[index] = photo.copyWith(galleryAssetId: galleryAssetId);
+    final recordId = _photos[index].recordId;
+    if (recordId != null && recordId > 0) {
+      _rememberGalleryAsset(recordId, galleryAssetId);
+      _rememberCaptureId(recordId, photoId);
+    }
     await _persistIndex();
   }
 
@@ -434,7 +451,7 @@ class PhotoGalleryService {
     }
 
     _cloudGalleryPhotos.removeAt(cloudIndex);
-    _removeLocalPhotosLinkedTo(photo);
+    await _removeLocalPhotosLinkedTo(photo);
     final cacheRecordId = photo.serverRecordId;
     if (cacheRecordId != null && cacheRecordId > 0) {
       await _deleteCacheForRecord(cacheRecordId);
@@ -472,7 +489,7 @@ class PhotoGalleryService {
     }
 
     for (final photo in List<AppPhoto>.from(_cloudGalleryPhotos)) {
-      _removeLocalPhotosLinkedTo(photo);
+      await _removeLocalPhotosLinkedTo(photo);
     }
     _cloudGalleryPhotos.clear();
     await _clearCloudCache();
@@ -480,7 +497,7 @@ class PhotoGalleryService {
     return (deleted: count, msg: result.msg);
   }
 
-  void _removeLocalPhotosLinkedTo(AppPhoto cloudPhoto) {
+  Future<void> _removeLocalPhotosLinkedTo(AppPhoto cloudPhoto) async {
     final recordId = cloudPhoto.serverRecordId;
     final linked = recordId != null
         ? _photos.where((photo) => photo.serverRecordId == recordId).toList()
@@ -488,19 +505,94 @@ class PhotoGalleryService {
     if (linked.isEmpty && cloudPhoto.hasLocalFile) {
       linked.add(cloudPhoto);
     }
+
+    final assetIds = _collectGalleryAssetIds(
+      cloudPhoto: cloudPhoto,
+      linked: linked,
+    );
+    final captureIds = _collectCaptureIds(
+      cloudPhoto: cloudPhoto,
+      linked: linked,
+    );
+    await _deleteFromSystemGallery(
+      assetIds: assetIds,
+      captureIds: captureIds,
+    );
+
+    if (recordId != null && recordId > 0) {
+      _forgetGalleryAsset(recordId);
+      _forgetCaptureId(recordId);
+    }
+
     for (final photo in linked) {
-      unawaited(_deletePhotoLocalOnly(photo));
+      await _deleteLocalFileOnly(photo);
       _photos.removeWhere((item) => item.id == photo.id);
+    }
+    await _persistIndex();
+  }
+
+  Set<String> _collectGalleryAssetIds({
+    required AppPhoto cloudPhoto,
+    required List<AppPhoto> linked,
+  }) {
+    final assetIds = <String>{};
+    void add(String? id) {
+      if (id != null && id.isNotEmpty) assetIds.add(id);
+    }
+
+    add(cloudPhoto.galleryAssetId);
+    final recordId = cloudPhoto.serverRecordId;
+    if (recordId != null && recordId > 0) {
+      add(_galleryAssetByRecordId[recordId]);
+    }
+    for (final photo in linked) {
+      add(photo.galleryAssetId);
+    }
+    return assetIds;
+  }
+
+  Set<String> _collectCaptureIds({
+    required AppPhoto cloudPhoto,
+    required List<AppPhoto> linked,
+  }) {
+    final captureIds = <String>{};
+    void add(String? id) {
+      if (id != null && id.isNotEmpty) captureIds.add(id);
+    }
+
+    final recordId = cloudPhoto.serverRecordId;
+    if (recordId != null && recordId > 0) {
+      add(_captureIdByRecordId[recordId]);
+    }
+    for (final photo in linked) {
+      add(photo.id);
+    }
+    return captureIds;
+  }
+
+  Future<void> _deleteFromSystemGallery({
+    required Set<String> assetIds,
+    required Set<String> captureIds,
+  }) async {
+    if (assetIds.isEmpty && captureIds.isEmpty) return;
+
+    await ensurePermission();
+
+    if (Platform.isAndroid) {
+      await GalleryMediaChannel.deleteAppPhotos(
+        assetIds: assetIds.toList(),
+        captureIds: captureIds.toList(),
+      );
+    }
+
+    if (assetIds.isNotEmpty) {
+      try {
+        await PhotoManager.editor.deleteWithIds(assetIds.toList());
+      } catch (_) {}
     }
   }
 
-  Future<void> _deletePhotoLocalOnly(AppPhoto photo) async {
-    if (photo.galleryAssetId != null) {
-      try {
-        await PhotoManager.editor.deleteWithIds([photo.galleryAssetId!]);
-      } catch (_) {}
-    }
-
+  Future<void> _deleteLocalFileOnly(AppPhoto photo) async {
     try {
       final file = File(photo.localPath);
       if (photo.hasLocalFile && await file.exists()) {
@@ -546,7 +638,11 @@ class PhotoGalleryService {
     final cachePath = await _cachePathForRecord(recordId);
     final cacheFile = File(cachePath);
     if (await cacheFile.exists() && await cacheFile.length() > 0) {
-      return photo.copyWith(localPath: cachePath);
+      return _withGalleryAssetId(
+        photo.copyWith(localPath: cachePath),
+        localCapture,
+        previous,
+      );
     }
 
     if (previous != null && previous.hasLocalFile) {
@@ -555,10 +651,20 @@ class PhotoGalleryService {
         final previousFile = File(previousPath);
         if (await previousFile.exists()) {
           final copied = await _copyFileToCache(previousFile, cachePath);
-          if (copied) return photo.copyWith(localPath: cachePath);
+          if (copied) {
+            return _withGalleryAssetId(
+              photo.copyWith(localPath: cachePath),
+              localCapture,
+              previous,
+            );
+          }
         }
       } else if (await cacheFile.exists()) {
-        return photo.copyWith(localPath: cachePath);
+        return _withGalleryAssetId(
+          photo.copyWith(localPath: cachePath),
+          localCapture,
+          previous,
+        );
       }
     }
 
@@ -566,17 +672,136 @@ class PhotoGalleryService {
       final localFile = File(localCapture.localPath);
       if (await localFile.exists()) {
         final copied = await _copyFileToCache(localFile, cachePath);
-        if (copied) return photo.copyWith(localPath: cachePath);
+        if (copied) {
+          return _withGalleryAssetId(
+            photo.copyWith(localPath: cachePath),
+            localCapture,
+            previous,
+          );
+        }
       }
     }
 
     final url = photo.remoteUrl;
     if (url != null && url.isNotEmpty) {
       final downloaded = await _downloadToCache(url, cachePath);
-      if (downloaded) return photo.copyWith(localPath: cachePath);
+      if (downloaded) return _withGalleryAssetId(photo, localCapture, previous);
     }
 
-    return photo;
+    return _withGalleryAssetId(photo, localCapture, previous);
+  }
+
+  AppPhoto _withGalleryAssetId(
+    AppPhoto photo,
+    AppPhoto? localCapture,
+    AppPhoto? previous,
+  ) {
+    if (photo.galleryAssetId != null) return photo;
+    final recordId = photo.serverRecordId;
+    final assetId = localCapture?.galleryAssetId ??
+        previous?.galleryAssetId ??
+        (recordId != null ? _galleryAssetByRecordId[recordId] : null);
+    if (assetId == null) return photo;
+    return photo.copyWith(galleryAssetId: assetId);
+  }
+
+  String? _galleryAssetIdForRecord(int recordId) {
+    final mapped = _galleryAssetByRecordId[recordId];
+    if (mapped != null) return mapped;
+    return _findLocalPhotoByRecordId(recordId)?.galleryAssetId;
+  }
+
+  void _rememberGalleryAsset(int recordId, String assetId) {
+    _galleryAssetByRecordId[recordId] = assetId;
+    unawaited(_persistGalleryAssetMap());
+  }
+
+  void _rememberCaptureId(int recordId, String captureId) {
+    _captureIdByRecordId[recordId] = captureId;
+    unawaited(_persistGalleryAssetMap());
+  }
+
+  void _forgetGalleryAsset(int recordId) {
+    if (!_galleryAssetByRecordId.containsKey(recordId)) return;
+    _galleryAssetByRecordId.remove(recordId);
+    unawaited(_persistGalleryAssetMap());
+  }
+
+  void _forgetCaptureId(int recordId) {
+    if (!_captureIdByRecordId.containsKey(recordId)) return;
+    _captureIdByRecordId.remove(recordId);
+    unawaited(_persistGalleryAssetMap());
+  }
+
+  void _rebuildGalleryAssetMapFromPhotos() {
+    for (final photo in _photos) {
+      final recordId = photo.recordId;
+      if (recordId == null || recordId <= 0) continue;
+      final assetId = photo.galleryAssetId;
+      if (assetId != null && assetId.isNotEmpty) {
+        _galleryAssetByRecordId[recordId] = assetId;
+      }
+      if (photo.id.isNotEmpty) {
+        _captureIdByRecordId[recordId] = photo.id;
+      }
+    }
+  }
+
+  Future<void> _loadGalleryAssetMap() async {
+    try {
+      final base = await getApplicationDocumentsDirectory();
+      final mapFile = File(p.join(base.path, _galleryAssetMapFileName));
+      if (!await mapFile.exists()) return;
+
+      final raw = jsonDecode(await mapFile.readAsString());
+      if (raw is! Map) return;
+      raw.forEach((key, value) {
+        final recordId = int.tryParse(key.toString());
+        if (recordId == null || recordId <= 0) return;
+
+        if (value is Map) {
+          final assetId = value['assetId']?.toString();
+          final captureId = value['captureId']?.toString();
+          if (assetId != null && assetId.isNotEmpty) {
+            _galleryAssetByRecordId[recordId] = assetId;
+          }
+          if (captureId != null && captureId.isNotEmpty) {
+            _captureIdByRecordId[recordId] = captureId;
+          }
+          return;
+        }
+
+        final assetId = value?.toString();
+        if (assetId != null && assetId.isNotEmpty) {
+          _galleryAssetByRecordId[recordId] = assetId;
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _persistGalleryAssetMap() async {
+    try {
+      final base = await getApplicationDocumentsDirectory();
+      final mapFile = File(p.join(base.path, _galleryAssetMapFileName));
+      final encoded = <String, dynamic>{};
+      final recordIds = {
+        ..._galleryAssetByRecordId.keys,
+        ..._captureIdByRecordId.keys,
+      };
+      for (final recordId in recordIds) {
+        final assetId = _galleryAssetByRecordId[recordId];
+        final captureId = _captureIdByRecordId[recordId];
+        if ((assetId == null || assetId.isEmpty) &&
+            (captureId == null || captureId.isEmpty)) {
+          continue;
+        }
+        encoded['$recordId'] = {
+          if (assetId != null && assetId.isNotEmpty) 'assetId': assetId,
+          if (captureId != null && captureId.isNotEmpty) 'captureId': captureId,
+        };
+      }
+      await mapFile.writeAsString(jsonEncode(encoded));
+    } catch (_) {}
   }
 
   Future<bool> _copyFileToCache(File source, String cachePath) async {
@@ -671,6 +896,17 @@ class PhotoGalleryService {
       final list = jsonDecode(await indexFile.readAsString()) as List<dynamic>;
       for (final item in list) {
         final photo = AppPhoto.fromJson(item as Map<String, dynamic>);
+        final recordId = photo.recordId;
+        final assetId = photo.galleryAssetId;
+        if (recordId != null &&
+            recordId > 0 &&
+            assetId != null &&
+            assetId.isNotEmpty) {
+          _galleryAssetByRecordId[recordId] = assetId;
+        }
+        if (recordId != null && recordId > 0 && photo.id.isNotEmpty) {
+          _captureIdByRecordId[recordId] = photo.id;
+        }
         if (photo.hasLocalFile) {
           if (await File(photo.localPath).exists()) {
             _photos.add(photo);

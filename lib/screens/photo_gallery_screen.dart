@@ -9,6 +9,7 @@ import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
 import '../widgets/app_photo_image.dart';
 import '../widgets/toast_message.dart';
+import 'system_photo_picker_screen.dart';
 
 /// 本应用拍摄照片相册
 class PhotoGalleryScreen extends StatefulWidget {
@@ -122,6 +123,173 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     }
     await context.push<void>(AppRoutes.galleryPhoto(initialIndex));
     if (mounted) setState(_syncPhotos);
+  }
+
+  Future<void> _pickSystemPhotoForAiCopy() async {
+    if (_isBatchMode) return;
+
+    final granted = await widget.galleryService.ensurePermission();
+    if (!mounted) return;
+    if (!granted) {
+      ToastMessage.show(context, '需要相册权限才能选择照片');
+      return;
+    }
+
+    final photo = await Navigator.of(context).push<AppPhoto>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const SystemPhotoPickerScreen(),
+      ),
+    );
+    if (!mounted) return;
+    if (photo == null) return;
+
+    context.push(AppRoutes.aiPetCopy, extra: photo);
+  }
+
+  Widget _buildAiCopyPickEntry() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _pickSystemPhotoForAiCopy,
+          borderRadius: BorderRadius.circular(14),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: const Color(0xFF1C2438),
+              border: Border.all(
+                color: AppColors.recordRed.withValues(alpha: 0.35),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFF8FC7), Color(0xFFE91E8C)],
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.photo_library_outlined,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '从相册选图',
+                          style: TextStyle(
+                            color: AppColors.textOnDark,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '选择手机照片生成 AI 趣味文案',
+                          style: TextStyle(
+                            color: AppColors.textOnDark.withValues(alpha: 0.55),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    color: AppColors.textOnDark.withValues(alpha: 0.45),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGalleryContent() {
+    return CustomScrollView(
+      slivers: [
+        if (!_isBatchMode)
+          SliverToBoxAdapter(child: _buildAiCopyPickEntry()),
+        if (_photos.isEmpty)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  '还没有拍摄照片',
+                  style: TextStyle(color: AppColors.textHint, fontSize: 16),
+                ),
+              ],
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 2),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 2,
+                mainAxisSpacing: 2,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final photo = _photos[index];
+                  final selected = _selectedIds.contains(photo.id);
+                  return GestureDetector(
+                    onTap: () => _openPhotoViewer(index),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        AppPhotoImage(
+                          photo: photo,
+                          fit: BoxFit.cover,
+                        ),
+                        if (_isBatchMode)
+                          Container(
+                            color: selected
+                                ? AppColors.primary.withValues(alpha: 0.35)
+                                : const Color(0x33000000),
+                            child: Align(
+                              alignment: Alignment.topRight,
+                              child: Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: Icon(
+                                  selected
+                                      ? Icons.check_circle
+                                      : Icons.circle_outlined,
+                                  color: selected
+                                      ? AppColors.primary
+                                      : AppColors.textOnDark,
+                                  size: 22,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+                childCount: _photos.length,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   Future<bool> _confirmDeleteMessage({
@@ -290,59 +458,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _photos.isEmpty
-          ? const Center(
-              child: Text(
-                '还没有拍摄照片',
-                style: TextStyle(color: AppColors.textHint, fontSize: 16),
-              ),
-            )
-          : GridView.builder(
-              padding: const EdgeInsets.all(2),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 2,
-                mainAxisSpacing: 2,
-              ),
-              itemCount: _photos.length,
-              itemBuilder: (context, index) {
-                final photo = _photos[index];
-                final selected = _selectedIds.contains(photo.id);
-                return GestureDetector(
-                  onTap: () => _openPhotoViewer(index),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      AppPhotoImage(
-                        photo: photo,
-                        fit: BoxFit.cover,
-                      ),
-                      if (_isBatchMode)
-                        Container(
-                          color: selected
-                              ? AppColors.primary.withValues(alpha: 0.35)
-                              : const Color(0x33000000),
-                          child: Align(
-                            alignment: Alignment.topRight,
-                            child: Padding(
-                              padding: const EdgeInsets.all(6),
-                              child: Icon(
-                                selected
-                                    ? Icons.check_circle
-                                    : Icons.circle_outlined,
-                                color: selected
-                                    ? AppColors.primary
-                                    : AppColors.textOnDark,
-                                size: 22,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
+          : _buildGalleryContent(),
     );
   }
 }

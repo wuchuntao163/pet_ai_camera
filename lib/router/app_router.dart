@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/app_services.dart';
+import '../screens/ai_pet_copy_screen.dart';
 import '../screens/camera_screen.dart';
+import '../models/app_photo.dart';
 import '../screens/photo_gallery_screen.dart';
 import '../screens/photo_viewer_screen.dart';
 import '../screens/splash_screen.dart';
@@ -33,6 +35,27 @@ GoRouter createAppRouter() {
           ),
         ),
         routes: [
+          GoRoute(
+            path: 'ai-copy',
+            pageBuilder: (context, state) {
+              final photo = state.extra as AppPhoto?;
+              if (photo == null) {
+                return _fadePage(
+                  state,
+                  const Scaffold(
+                    body: Center(child: Text('照片不存在')),
+                  ),
+                );
+              }
+              return _fadePage(
+                state,
+                AiPetCopyScreen(
+                  photo: photo,
+                  galleryService: AppServices.instance.photoGallery,
+                ),
+              );
+            },
+          ),
           GoRoute(
             path: 'photo/:index',
             pageBuilder: (context, state) {

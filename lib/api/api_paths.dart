@@ -126,4 +126,7 @@ class ApiPaths {
 
   /// 删除所有摄像头记录 · POST
   static const deleteAllCameraRecords = '/api/camera/deleteAllCameraRecords';
+
+  /// AI 趣味文案 · POST
+  static const generatePetText = '/api/camera/generatePetText';
 }

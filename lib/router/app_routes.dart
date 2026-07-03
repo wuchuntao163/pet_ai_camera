@@ -4,5 +4,7 @@ abstract final class AppRoutes {
   static const camera = '/';
   static const gallery = '/gallery';
 
+  static const aiPetCopy = '/gallery/ai-copy';
+
   static String galleryPhoto(int index) => '/gallery/photo/$index';
 }

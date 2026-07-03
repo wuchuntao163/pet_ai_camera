@@ -1771,3 +1771,24 @@
 ```
 
 ---
+### 10. AI趣味文案
+
+**接口地址**: `/api/camera/generatePetText`
+
+**请求方式**: POST
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| app_id | int | 是 | 应用ID |
+| user_id | int | 是 | 用户ID |
+| image | string | 是 | 文件URL图片 |
+
+**返回示例**:
+```json
+{
+    "code": 200,
+    "msg": "success",
+    "data": {
+        "text": "我是瞪着卡姿兰大眼睛的银渐层小馋猫，正巴巴等着投喂，快把你手里的好吃的统统交出来~",
+        "color": "#DDE6ED"
+    }
+}
