@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -61,9 +63,11 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
           '删除照片',
           style: TextStyle(color: AppColors.textOnDark),
         ),
-        content: const Text(
-          '将从本应用和系统相册中删除这张照片，确定吗？',
-          style: TextStyle(color: AppColors.textHint),
+        content: Text(
+          Platform.isIOS
+              ? '将从本应用删除这张照片，确定吗？'
+              : '将从本应用和系统相册中删除这张照片，确定吗？',
+          style: const TextStyle(color: AppColors.textHint),
         ),
         actions: [
           TextButton(

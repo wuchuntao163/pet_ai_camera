@@ -9,15 +9,18 @@ class CountdownOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black38,
-      alignment: Alignment.center,
-      child: Text(
-        '$seconds',
-        style: const TextStyle(
-          fontSize: 96,
-          fontWeight: FontWeight.bold,
-          color: AppColors.textOnDark,
+    return IgnorePointer(
+      child: ColoredBox(
+        color: Colors.black38,
+        child: Center(
+          child: Text(
+            '$seconds',
+            style: const TextStyle(
+              fontSize: 96,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textOnDark,
+            ),
+          ),
         ),
       ),
     );

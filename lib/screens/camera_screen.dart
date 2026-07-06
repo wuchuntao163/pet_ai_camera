@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
@@ -8,8 +7,8 @@ import '../constants/app_images.dart';
 import '../models/camera_config.dart';
 import '../models/camera_toolbar.dart';
 import '../services/camera_service.dart';
-import '../services/photo_crop_service.dart';
 import '../constants/app_sizes.dart';
+import '../utils/preview_frame_geometry.dart';
 import '../widgets/camera_top_bar.dart';
 import '../widgets/camera_bottom_bar.dart';
 import '../widgets/pet_emoji_button.dart';
@@ -60,7 +59,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   String? _galleryThumbLocalPath;
   String? _galleryThumbRemoteUrl;
   bool _galleryThumbPreferCloud = false;
-  Uint8List? _galleryThumbBytes;
 
   @override
   void initState() {
@@ -82,13 +80,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     await _initCamera();
   }
 
-  void _applyCaptureGalleryThumb(String localPath, {String? thumbnailPath}) {
+  void _applyCaptureGalleryThumb(String localPath) {
     _galleryThumbPreferCloud = false;
-    if (Platform.isIOS) {
-      _galleryThumbLocalPath = thumbnailPath ?? localPath;
-    } else {
-      _galleryThumbLocalPath = localPath;
-    }
+    _galleryThumbLocalPath = localPath;
     _galleryThumbRemoteUrl = null;
     _lastPhotoRevision++;
   }
@@ -96,47 +90,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   void _syncGalleryThumbFromLatest({required bool preferCloud}) {
     final latest = _photoGallery.latestPhoto;
 
-    if (!Platform.isIOS) {
-      _galleryThumbPreferCloud = preferCloud;
-      if (latest == null) {
-        _galleryThumbLocalPath = null;
-        _galleryThumbRemoteUrl = null;
-        return;
-      }
-      if (preferCloud) {
-        _galleryThumbLocalPath = null;
-        _galleryThumbRemoteUrl = latest.remoteUrl;
-      } else if (latest.hasLocalFile) {
-        _galleryThumbLocalPath = latest.localPath;
-        _galleryThumbRemoteUrl = latest.remoteUrl;
-      } else {
-        _galleryThumbLocalPath = null;
-        _galleryThumbRemoteUrl = latest.remoteUrl;
-        _galleryThumbPreferCloud = latest.remoteUrl != null;
-      }
-      _lastPhotoRevision++;
-      return;
-    }
-
-    final hadMemoryThumb = _galleryThumbBytes != null && _galleryThumbBytes!.isNotEmpty;
-    final previousLocalPath = _galleryThumbLocalPath;
-    final previousRemoteUrl = _galleryThumbRemoteUrl;
-
     _galleryThumbPreferCloud = preferCloud;
     if (latest == null) {
-      final hadVisibleThumb = hadMemoryThumb ||
-          previousLocalPath != null ||
-          previousRemoteUrl != null;
       _galleryThumbLocalPath = null;
       _galleryThumbRemoteUrl = null;
-      _galleryThumbBytes = null;
-      _galleryThumbPreferCloud = false;
-      if (hadVisibleThumb) _lastPhotoRevision++;
       return;
     }
-
-    _galleryThumbBytes = null;
-
     if (preferCloud) {
       _galleryThumbLocalPath = null;
       _galleryThumbRemoteUrl = latest.remoteUrl;
@@ -148,13 +107,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       _galleryThumbRemoteUrl = latest.remoteUrl;
       _galleryThumbPreferCloud = latest.remoteUrl != null;
     }
-
-    final displayChanged = hadMemoryThumb ||
-        previousLocalPath != _galleryThumbLocalPath ||
-        previousRemoteUrl != _galleryThumbRemoteUrl;
-    if (displayChanged) {
-      _lastPhotoRevision++;
-    }
+    _lastPhotoRevision++;
   }
 
   @override
@@ -172,7 +125,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       _cameraService.pause();
     } else if (state == AppLifecycleState.resumed && _lifecyclePaused) {
       _lifecyclePaused = false;
-      _initCamera();
+      // 仅 pause 过则 resume，避免 dispose+initialize 全量重建（iOS 尤其慢）
+      if (_cameraService.isInitialized) {
+        unawaited(_resumeCameraAfterOverlay());
+      } else {
+        unawaited(_initCamera());
+      }
     }
   }
 
@@ -181,9 +139,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   BurstOption get _burst => BurstOption.all[_settings.burstIndex];
   TimerOption get _timer => TimerOption.all[_settings.timerIndex];
 
-  double get _previewVerticalAlignY => _aspectRatio.usesFullScreenPreview
-      ? 0.5
-      : AppSizes.previewVerticalAlignY;
+  double get _previewVerticalAlignY {
+    if (_aspectRatio.usesFullScreenPreview) return 0.5;
+    if (Platform.isIOS && _aspectRatio.usesNativeSensorOutput) {
+      return AppSizes.ios34PreviewAlignY;
+    }
+    return AppSizes.previewVerticalAlignY;
+  }
 
   /// 9:16 全屏：原生 ViewPort 用屏幕比例铺满；3:4 走 contain 不设置
   double? _nativeViewportAspect(MediaQueryData mq) {
@@ -195,7 +157,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     return null;
   }
 
-  /// 预览/裁切参考区域（全屏模式 = 整屏，与预览 WYSIWYG）
+  /// 预览/裁切参考区域（9:16 全屏 = 整屏；其余为顶底栏之间的预览区）
   Size _previewAreaSize(MediaQueryData mq) {
     if (_aspectRatio.usesFullScreenPreview) {
       return mq.size;
@@ -207,12 +169,132 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     return Size(mq.size.width, h);
   }
 
+  ({double top, double bottom}) _iosPreviewAreaInsets(MediaQueryData mq) {
+    final insets = previewAreaInsets(
+      screenHeight: mq.size.height,
+      safeTop: mq.padding.top,
+    );
+    return (top: insets.top, bottom: insets.bottom);
+  }
+
+  /// 倒计时遮罩应与预览取景框一致（与 [AspectRatioMask] / [CameraPreviewView] 同源几何）
+  Rect _viewfinderRect({
+    required MediaQueryData mq,
+    required BoxConstraints constraints,
+    required bool overlayOnFullScreen,
+  }) {
+    final w = overlayOnFullScreen ? mq.size.width : constraints.maxWidth;
+    final h = overlayOnFullScreen ? mq.size.height : constraints.maxHeight;
+
+    if (_aspectRatio.usesFullScreenPreview) {
+      return Rect.fromLTWH(0, 0, w, h);
+    }
+
+    if (_aspectRatio.usesNativeSensorOutput) {
+      if (Platform.isIOS && overlayOnFullScreen) {
+        return computeNativeSensorPreviewRect(
+          screenWidth: mq.size.width,
+          screenHeight: mq.size.height,
+          safeTop: mq.padding.top,
+          previewAspect: _cameraService.previewAspectRatio,
+          verticalAlignY: _previewVerticalAlignY,
+        );
+      }
+      final layout = computePreviewScreenLayout(
+        screenW: w,
+        screenH: h,
+        previewAspect: _cameraService.previewAspectRatio,
+        fitContain: true,
+        fullScreenPreview: false,
+        verticalAlignY: _previewVerticalAlignY,
+      );
+      return Rect.fromLTWH(
+        layout.offsetX,
+        layout.offsetY,
+        layout.scaledW,
+        layout.scaledH,
+      );
+    }
+
+    final insets = overlayOnFullScreen && Platform.isIOS
+        ? _iosPreviewAreaInsets(mq)
+        : (top: 0.0, bottom: 0.0);
+    final frame = PreviewFrameGeometry.compute(
+      screenWidth: overlayOnFullScreen ? mq.size.width : w,
+      screenHeight: overlayOnFullScreen ? mq.size.height : h,
+      ratio: _aspectRatio.ratio,
+      topInset: insets.top,
+      bottomInset: insets.bottom,
+      frameAlignY: _previewVerticalAlignY,
+    );
+    return Rect.fromLTWH(
+      frame.boxLeft,
+      frame.boxTop,
+      frame.boxWidth,
+      frame.boxHeight,
+    );
+  }
+
+  Widget _buildCountdownOverlay(
+    BuildContext context, {
+    required bool fullScreenCoordinates,
+  }) {
+    if (_countdown == null) return const SizedBox.shrink();
+
+    if (fullScreenCoordinates) {
+      final mq = MediaQuery.of(context);
+      final rect = _viewfinderRect(
+        mq: mq,
+        constraints: BoxConstraints.tight(mq.size),
+        overlayOnFullScreen: true,
+      );
+      return Positioned(
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        child: CountdownOverlay(seconds: _countdown!),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final mq = MediaQuery.of(context);
+        final rect = _viewfinderRect(
+          mq: mq,
+          constraints: constraints,
+          overlayOnFullScreen: false,
+        );
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned(
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height,
+              child: CountdownOverlay(seconds: _countdown!),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _syncPreviewModeForAspect() async {
     if (!_cameraService.isInitialized || !mounted) return;
     final mq = MediaQuery.of(context);
     await _cameraService.setPreviewMode(
       nativeSensorContain: _aspectRatio.usesNativeSensorOutput,
       viewportAspect: _nativeViewportAspect(mq),
+      iosPreviewRect: Platform.isIOS && _aspectRatio.usesNativeSensorOutput
+          ? computeNativeSensorPreviewRect(
+              screenWidth: mq.size.width,
+              screenHeight: mq.size.height,
+              safeTop: mq.padding.top,
+              previewAspect: _cameraService.previewAspectRatio,
+            )
+          : null,
     );
   }
 
@@ -375,11 +457,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           SidebarSoundStore.instance.activeSoundEffectId;
 
       for (var i = 0; i < burstCount; i++) {
-        if (Platform.isAndroid) {
-          if (i == 0 && mounted) {
-            setState(() => _isGalleryLoading = true);
-          }
-        } else if (mounted) {
+        if (i == 0 && mounted) {
           setState(() => _isGalleryLoading = true);
         }
         if (mounted) _playCaptureFlash();
@@ -394,57 +472,20 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           ),
         );
         if (capture != null) {
-          if (Platform.isAndroid) {
-            if (mounted) {
-              setState(() {
-                _applyCaptureGalleryThumb(capture.fullPath);
-                _isGalleryLoading = false;
-              });
-            }
-            unawaited(_photoGallery.registerCapture(
-              id: reserved.id,
-              localPath: capture.fullPath,
-              soundEffectId: sessionSoundEffectId,
-            ));
-          } else {
-            Uint8List? thumbBytes = capture.thumbnailBytes;
-            final thumbPath = capture.thumbnailPath;
-            if (thumbBytes == null && thumbPath != null) {
-              try {
-                thumbBytes = await File(thumbPath).readAsBytes();
-              } catch (_) {}
-            }
-            if (mounted) {
-              setState(() => _isGalleryLoading = false);
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted) return;
-                setState(() {
-                  _galleryThumbBytes = thumbBytes;
-                  _applyCaptureGalleryThumb(
-                    capture.fullPath,
-                    thumbnailPath: thumbPath,
-                  );
-                });
-              });
-            }
-            unawaited(
-              _processCaptureAfterShutter(
-                capturePath: capture.fullPath,
-                cropContext: cropContext,
-                reserved: reserved,
-                soundEffectId: sessionSoundEffectId,
-              ).then((ok) {
-                if (!mounted || !ok) return;
-                final latest = _photoGallery.latestPhoto;
-                if (latest?.remoteUrl == null) return;
-                setState(() => _galleryThumbRemoteUrl = latest!.remoteUrl);
-              }),
-            );
+          if (mounted) {
+            setState(() {
+              _applyCaptureGalleryThumb(capture.fullPath);
+              _isGalleryLoading = false;
+            });
           }
-        } else if (Platform.isAndroid) {
-          if (i == 0) _stopGalleryLoading();
-        } else if (mounted) {
-          setState(() => _isGalleryLoading = false);
+          unawaited(_registerCaptureAfterShutter(
+            capturePath: capture.fullPath,
+            cropContext: cropContext,
+            reserved: reserved,
+            soundEffectId: sessionSoundEffectId,
+          ));
+        } else if (i == 0) {
+          _stopGalleryLoading();
         }
         if (i < burstCount - 1) {
           await Future.delayed(const Duration(milliseconds: 350));
@@ -476,7 +517,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     setState(() => _isGalleryLoading = false);
   }
 
-  Future<bool> _processCaptureAfterShutter({
+  /// 登记成片（双端均在原生侧裁切/校正后再入库）
+  Future<void> _registerCaptureAfterShutter({
     required String capturePath,
     required _CaptureCropContext cropContext,
     required ({String id, String path}) reserved,
@@ -484,38 +526,15 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }) async {
     var localPath = capturePath;
 
-    if (cropContext.aspectOption.usesNativeSensorOutput) {
-      // iOS 3:4 已在原生侧处理；其余比例在 Dart 裁切
-    } else {
-      await PhotoCropService.cropToPreviewFrame(
-        sourcePath: localPath,
-        aspectOption: cropContext.aspectOption,
-        screenSize: cropContext.screenSize,
-        previewAspect: cropContext.previewAspect,
-        frameAlignY: cropContext.frameAlignY,
-        fitContain: cropContext.fitContain,
-        fullScreenPreview: cropContext.fullScreenPreview,
-        mirrorFront: cropContext.mirrorFront,
-      );
-    }
-
     if (localPath != reserved.path) {
       final moved = await _moveCaptureToReserved(localPath, reserved.path);
-      if (!moved) return false;
+      if (!moved) return;
       localPath = reserved.path;
     }
 
     await _photoGallery.registerCapture(
       id: reserved.id,
       localPath: localPath,
-      soundEffectId: soundEffectId,
-      upload: false,
-      syncToGallery: false,
-    );
-
-    unawaited(_photoGallery.syncToSystemGallery(reserved.id));
-    return await _photoGallery.uploadRecordForPhoto(
-      reserved.id,
       soundEffectId: soundEffectId,
     );
   }
@@ -649,10 +668,18 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
 
     if (Platform.isIOS) {
+      final mq = MediaQuery.of(context);
+      final areaInsets = _aspectRatio.usesNativeSensorOutput
+          ? _iosPreviewAreaInsets(mq)
+          : (top: 0.0, bottom: 0.0);
       return CameraPreviewView(
         key: const ValueKey('camera_preview_view'),
-        maskRatio: _aspectRatio.usesPreviewMask ? _aspectRatio.ratio : null,
+        maskRatio: _aspectRatio.usesPreviewMask || _aspectRatio.usesNativeSensorOutput
+            ? _aspectRatio.ratio
+            : null,
         verticalAlignY: _previewVerticalAlignY,
+        topInset: areaInsets.top,
+        bottomInset: areaInsets.bottom,
       );
     }
 
@@ -770,7 +797,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       isPhotoMode: _isPhotoMode,
       galleryThumbLocalPath: _galleryThumbLocalPath,
       galleryThumbRemoteUrl: _galleryThumbRemoteUrl,
-      galleryThumbBytes: _galleryThumbBytes,
       galleryThumbPreferCloud: _galleryThumbPreferCloud,
       lastPhotoRevision: _lastPhotoRevision,
       isGalleryLoading: _isGalleryLoading,
@@ -787,12 +813,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       fit: StackFit.expand,
       children: [
         CaptureShutterOverlay(flashOpacity: _flashOpacity),
-        if (_countdown != null) CountdownOverlay(seconds: _countdown!),
         if (_cameraService.isInitialized && !_isLoading) ...[
           Positioned(
             left: 0,
             right: 0,
-            bottom: AppSizes.zoomBarBottom,
+            bottom: Platform.isIOS
+                ? AppSizes.iosZoomBarBottom
+                : AppSizes.zoomBarBottom,
             child: Center(
               child: ZoomControl(
                 currentZoom: _currentZoom,
@@ -831,7 +858,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
-  /// iOS / Android 9:16：预览铺满整屏，顶/底栏叠在上面
+  /// 9:16：预览铺满整屏，顶/底栏叠在上面
   Widget _buildFullScreenLayout(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.cameraBg,
@@ -839,6 +866,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         fit: StackFit.expand,
         children: [
           Positioned.fill(child: _buildPreviewArea(context)),
+          _buildCountdownOverlay(context, fullScreenCoordinates: true),
           Column(
             children: [
               SafeArea(
@@ -857,7 +885,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
-  /// Android 非 9:16：预览在顶栏与底栏之间，3:4 上下留黑边
+  /// 非 9:16：预览在顶栏与底栏之间，3:4 上下留黑边
   Widget _buildStandardLayout(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bottomBarBg,
@@ -873,6 +901,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
               children: [
                 _buildPreviewArea(context),
                 _buildPreviewOverlays(),
+                _buildCountdownOverlay(context, fullScreenCoordinates: false),
               ],
             ),
           ),
