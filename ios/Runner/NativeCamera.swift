@@ -24,6 +24,7 @@ final class NativeCameraController: NSObject {
   private(set) var maxZoom: Double = 1.0
   private(set) var previewAspectRatio: Double = 3.0 / 4.0
   private var previewFitContain = true
+  private var previewLayoutFrame: CGRect?
 
   private var captureCompletion: ((Result<[String: Any], Error>) -> Void)?
   private var pendingCrop: [String: Any]?
@@ -32,14 +33,35 @@ final class NativeCameraController: NSObject {
   func attachPreview(_ view: NativeCameraPreviewView) {
     previewView = view
     view.videoPreviewLayer.session = session
-    applyPreviewVideoGravity(to: view)
+    applyPreviewLayout(to: view)
   }
 
   func setPreviewFitContain(_ contain: Bool) {
     previewFitContain = contain
     DispatchQueue.main.async {
       if let view = self.previewView {
-        self.applyPreviewVideoGravity(to: view)
+        self.applyPreviewLayout(to: view)
+      }
+    }
+  }
+
+  func setPreviewLayout(
+    fullScreen: Bool,
+    left: Double,
+    top: Double,
+    width: Double,
+    height: Double,
+    contain: Bool
+  ) {
+    previewFitContain = contain
+    if fullScreen {
+      previewLayoutFrame = nil
+    } else {
+      previewLayoutFrame = CGRect(x: left, y: top, width: width, height: height)
+    }
+    DispatchQueue.main.async {
+      if let view = self.previewView {
+        self.applyPreviewLayout(to: view)
       }
     }
   }
@@ -48,9 +70,13 @@ final class NativeCameraController: NSObject {
     AudioServicesPlaySystemSound(1108)
   }
 
+  private func applyPreviewLayout(to view: NativeCameraPreviewView) {
+    let frame = previewLayoutFrame ?? view.bounds
+    view.applyPreviewFrame(frame, contain: previewFitContain)
+  }
+
   private func applyPreviewVideoGravity(to view: NativeCameraPreviewView) {
-    view.videoPreviewLayer.videoGravity =
-      previewFitContain ? .resizeAspect : .resizeAspectFill
+    applyPreviewLayout(to: view)
   }
 
   func initialize(completion: @escaping (Result<[String: Any], Error>) -> Void) {
@@ -348,6 +374,8 @@ extension NativeCameraController: AVCapturePhotoCaptureDelegate {
               url: photoURL,
               mirrorFront: mirrorFront
             )
+          } else if let cropParams = cropParams {
+            _ = PhotoCropHelper.cropFileInPlace(url: photoURL, params: cropParams)
           }
 
           var result: [String: Any] = [
@@ -372,12 +400,23 @@ extension NativeCameraController: AVCapturePhotoCaptureDelegate {
 }
 
 final class NativeCameraPreviewView: UIView {
-  override class var layerClass: AnyClass {
-    AVCaptureVideoPreviewLayer.self
+  let videoPreviewLayer = AVCaptureVideoPreviewLayer()
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    backgroundColor = UIColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1)
+    videoPreviewLayer.videoGravity = .resizeAspect
+    layer.addSublayer(videoPreviewLayer)
   }
 
-  var videoPreviewLayer: AVCaptureVideoPreviewLayer {
-    layer as! AVCaptureVideoPreviewLayer
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func applyPreviewFrame(_ frame: CGRect, contain: Bool) {
+    videoPreviewLayer.frame = frame
+    videoPreviewLayer.videoGravity =
+      contain ? .resizeAspect : .resizeAspectFill
   }
 }
 
@@ -480,6 +519,23 @@ final class NativeCameraPlugin: NSObject, FlutterPlugin {
       let contain = args?["contain"] as? Bool ?? false
       controller.setPreviewFitContain(contain)
       result(controller.stateMap())
+    case "setPreviewLayout":
+      let args = call.arguments as? [String: Any]
+      let contain = args?["contain"] as? Bool ?? false
+      let fullScreen = args?["fullScreen"] as? Bool ?? true
+      let left = args?["left"] as? Double ?? 0
+      let top = args?["top"] as? Double ?? 0
+      let width = args?["width"] as? Double ?? 0
+      let height = args?["height"] as? Double ?? 0
+      controller.setPreviewLayout(
+        fullScreen: fullScreen,
+        left: left,
+        top: top,
+        width: width,
+        height: height,
+        contain: contain
+      )
+      result(nil)
     case "playShutterSound":
       controller.playShutterSound()
       result(nil)

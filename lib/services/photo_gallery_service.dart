@@ -497,14 +497,32 @@ class PhotoGalleryService {
     return (deleted: count, msg: result.msg);
   }
 
-  Future<void> _removeLocalPhotosLinkedTo(AppPhoto cloudPhoto) async {
+  List<AppPhoto> _linkedLocalPhotos(AppPhoto cloudPhoto) {
     final recordId = cloudPhoto.serverRecordId;
     final linked = recordId != null
         ? _photos.where((photo) => photo.serverRecordId == recordId).toList()
         : <AppPhoto>[];
+    if (recordId != null) {
+      final capture = _findLocalPhotoByRecordId(recordId);
+      if (capture != null &&
+          !linked.any((photo) => photo.id == capture.id)) {
+        linked.insert(0, capture);
+      }
+    }
     if (linked.isEmpty && cloudPhoto.hasLocalFile) {
       linked.add(cloudPhoto);
     }
+    return linked;
+  }
+
+  bool _isCapturePhotoId(String id) => !id.startsWith('record_');
+
+  Future<void> _removeLocalPhotosLinkedTo(
+    AppPhoto cloudPhoto, {
+    bool deleteSystemGallery = true,
+  }) async {
+    final recordId = cloudPhoto.serverRecordId;
+    final linked = _linkedLocalPhotos(cloudPhoto);
 
     final assetIds = _collectGalleryAssetIds(
       cloudPhoto: cloudPhoto,
@@ -514,10 +532,12 @@ class PhotoGalleryService {
       cloudPhoto: cloudPhoto,
       linked: linked,
     );
-    await _deleteFromSystemGallery(
-      assetIds: assetIds,
-      captureIds: captureIds,
-    );
+    if (deleteSystemGallery) {
+      await _deleteFromSystemGallery(
+        assetIds: assetIds,
+        captureIds: captureIds,
+      );
+    }
 
     if (recordId != null && recordId > 0) {
       _forgetGalleryAsset(recordId);
@@ -565,31 +585,32 @@ class PhotoGalleryService {
       add(_captureIdByRecordId[recordId]);
     }
     for (final photo in linked) {
-      add(photo.id);
+      if (_isCapturePhotoId(photo.id)) {
+        add(photo.id);
+      }
     }
     return captureIds;
   }
 
-  Future<void> _deleteFromSystemGallery({
+  /// 返回 false 表示用户取消或系统相册删除失败。iOS 仅保存到系统相册，不执行删除。
+  Future<bool> _deleteFromSystemGallery({
     required Set<String> assetIds,
     required Set<String> captureIds,
   }) async {
-    if (assetIds.isEmpty && captureIds.isEmpty) return;
+    if (Platform.isIOS) return true;
 
-    await ensurePermission();
+    final validCaptureIds =
+        captureIds.where(_isCapturePhotoId).toSet();
+    var ids = Set<String>.from(assetIds);
+    if (ids.isEmpty) return true;
 
-    if (Platform.isAndroid) {
-      await GalleryMediaChannel.deleteAppPhotos(
-        assetIds: assetIds.toList(),
-        captureIds: captureIds.toList(),
-      );
-    }
+    if (!await ensurePermission()) return false;
 
-    if (assetIds.isNotEmpty) {
-      try {
-        await PhotoManager.editor.deleteWithIds(assetIds.toList());
-      } catch (_) {}
-    }
+    await GalleryMediaChannel.deleteAppPhotos(
+      assetIds: ids.toList(),
+      captureIds: validCaptureIds.toList(),
+    );
+    return true;
   }
 
   Future<void> _deleteLocalFileOnly(AppPhoto photo) async {

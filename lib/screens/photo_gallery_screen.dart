@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -326,7 +328,9 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     final count = _selectedIds.length;
     final confirmed = await _confirmDeleteMessage(
       title: '删除选中照片',
-      content: '将从本应用和系统相册中删除 $count 张照片，确定吗？',
+      content: Platform.isIOS
+          ? '将从本应用删除 $count 张照片，确定吗？'
+          : '将从本应用和系统相册中删除 $count 张照片，确定吗？',
     );
     if (!confirmed || !mounted) return;
 
@@ -352,7 +356,9 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
 
     final confirmed = await _confirmDeleteMessage(
       title: '全部删除',
-      content: '将从本应用和系统相册中删除全部 ${_photos.length} 张照片，确定吗？',
+      content: Platform.isIOS
+          ? '将从本应用删除全部 ${_photos.length} 张照片，确定吗？'
+          : '将从本应用和系统相册中删除全部 ${_photos.length} 张照片，确定吗？',
     );
     if (!confirmed || !mounted) return;
 

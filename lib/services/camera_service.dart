@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show Rect;
 
 import 'package:permission_handler/permission_handler.dart';
 
@@ -103,16 +105,33 @@ class CameraService {
   Future<void> setPreviewMode({
     required bool nativeSensorContain,
     double? viewportAspect,
+    Rect? iosPreviewRect,
   }) async {
     if (!_initialized) return;
-    if (nativeSensorContain == _nativePreviewContain) return;
+    final containChanged = nativeSensorContain != _nativePreviewContain;
     _nativePreviewContain = nativeSensorContain;
     try {
-      final result = await NativeCameraChannel.setPreviewMode(
-        contain: nativeSensorContain,
-        viewportAspect: viewportAspect,
-      );
-      _applyInitResult(result);
+      if (containChanged) {
+        final result = await NativeCameraChannel.setPreviewMode(
+          contain: nativeSensorContain,
+          viewportAspect: viewportAspect,
+        );
+        _applyInitResult(result);
+      }
+      if (Platform.isIOS) {
+        if (iosPreviewRect != null) {
+          await NativeCameraChannel.setPreviewLayout(
+            contain: nativeSensorContain,
+            fullScreen: false,
+            rect: iosPreviewRect,
+          );
+        } else {
+          await NativeCameraChannel.setPreviewLayout(
+            contain: nativeSensorContain,
+            fullScreen: true,
+          );
+        }
+      }
     } catch (_) {}
   }
 

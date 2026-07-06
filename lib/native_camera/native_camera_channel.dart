@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show Rect;
 
 import 'package:flutter/services.dart';
 
@@ -133,6 +134,28 @@ class NativeCameraChannel {
     );
     if (map == null) throw StateError('setPreviewMode returned null');
     return NativeCameraInitResult.fromMap(map);
+  }
+
+  /// iOS：原生预览层定位（3:4 对齐 Android 取景框）
+  static Future<void> setPreviewLayout({
+    required bool contain,
+    bool fullScreen = true,
+    Rect? rect,
+  }) async {
+    if (!Platform.isIOS) return;
+    await _channel.invokeMethod<void>(
+      'setPreviewLayout',
+      {
+        'contain': contain,
+        'fullScreen': fullScreen,
+        if (rect != null) ...{
+          'left': rect.left,
+          'top': rect.top,
+          'width': rect.width,
+          'height': rect.height,
+        },
+      },
+    );
   }
 
   static Future<void> pause() async {

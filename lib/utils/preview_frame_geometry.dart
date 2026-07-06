@@ -1,3 +1,49 @@
+import 'dart:ui' show Rect;
+
+import '../constants/app_sizes.dart';
+
+/// 顶/底栏之间的预览区 insets（与 Android 标准布局一致）
+({double top, double bottom}) previewAreaInsets({
+  required double screenHeight,
+  required double safeTop,
+}) {
+  final top = safeTop + AppSizes.topBarHeight;
+  final areaH = (screenHeight -
+          AppSizes.topBarHeight -
+          AppSizes.cameraBottomChrome)
+      .clamp(1.0, screenHeight);
+  final bottom = screenHeight - top - areaH;
+  return (top: top, bottom: bottom);
+}
+
+/// iOS 3:4 原生预览矩形（与 Android contain 定位一致，[verticalAlignY] 控制上移）
+Rect computeNativeSensorPreviewRect({
+  required double screenWidth,
+  required double screenHeight,
+  required double safeTop,
+  required double previewAspect,
+  double verticalAlignY = AppSizes.ios34PreviewAlignY,
+}) {
+  final insets = previewAreaInsets(
+    screenHeight: screenHeight,
+    safeTop: safeTop,
+  );
+  final areaH = screenHeight - insets.top - insets.bottom;
+  final layout = computePreviewScreenLayout(
+    screenW: screenWidth,
+    screenH: areaH,
+    previewAspect: previewAspect,
+    fitContain: true,
+    fullScreenPreview: false,
+    verticalAlignY: verticalAlignY,
+  );
+  return Rect.fromLTWH(
+    layout.offsetX,
+    insets.top + layout.offsetY,
+    layout.scaledW,
+    layout.scaledH,
+  );
+}
 
 /// 预览在屏幕上的实际布局（与 [CameraPreviewView] 一致）
 class PreviewScreenLayout {
