@@ -551,6 +551,32 @@ final class NativeCameraPlugin: NSObject, FlutterPlugin {
         case .failure(let error): result(FlutterError(code: "CAPTURE_FAILED", message: error.localizedDescription, details: nil))
         }
       }
+    case "writeImageGps":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String,
+            let latitude = args["latitude"] as? Double,
+            let longitude = args["longitude"] as? Double else {
+        result(FlutterError(code: "ARG", message: "path, latitude, longitude required", details: nil))
+        return
+      }
+      let ok = PhotoExifHelper.writeGps(
+        to: URL(fileURLWithPath: path),
+        latitude: latitude,
+        longitude: longitude
+      )
+      result(ok)
+    case "writeImageDevice":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "ARG", message: "path required", details: nil))
+        return
+      }
+      let ok = PhotoExifHelper.writeDeviceInfo(
+        to: URL(fileURLWithPath: path),
+        make: args["make"] as? String,
+        model: args["model"] as? String
+      )
+      result(ok)
     default:
       result(FlutterMethodNotImplemented)
     }

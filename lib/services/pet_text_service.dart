@@ -7,7 +7,7 @@ import '../api/api.dart';
 import '../services/file_upload_service.dart';
 
 /// 将接口返回的 `#RRGGBB` 转为 Flutter [Color]（ARGB 0xAARRGGBB）
-Color parseHexColor(String? hex, {Color fallback = const Color(0xFFDDE6ED)}) {
+Color parseHexColor(String? hex, {Color fallback = Colors.white}) {
   if (hex == null || hex.isEmpty) return fallback;
   var value = hex.trim().replaceFirst('#', '');
   if (value.length == 6) value = 'FF$value';
@@ -129,7 +129,7 @@ class PetTextService {
     final String url;
 
     if (path.isNotEmpty && await File(path).exists()) {
-      url = await FileUploadService.uploadLocalImage(path);
+      url = await FileUploadService.uploadFile(path);
     } else {
       var remote = imageUrl?.trim() ?? '';
       if (remote.isEmpty) {

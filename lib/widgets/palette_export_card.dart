@@ -3,40 +3,38 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../services/file_upload_service.dart';
-import '../services/pet_text_service.dart';
-import 'organic_bubble.dart';
+import '../services/photo_metadata_service.dart';
 
-/// AI 趣味文案导出卡片（相框：内边距 + 原图完整显示 + 底色文案区）
-class PetCopyExportCard extends StatefulWidget {
+/// 调色盘导出卡片：相框 + 原图 + 元数据信息区
+class PaletteExportCard extends StatefulWidget {
   final String? localPath;
   final String? remoteUrl;
-  final String text;
-  final Color textBackgroundColor;
+  final PhotoMetadata metadata;
+  final Color bandColor;
   final Color textColor;
-  final int bubbleSeed;
   final double width;
   final bool roundCorners;
 
-  const PetCopyExportCard({
+  const PaletteExportCard({
     super.key,
     this.localPath,
     this.remoteUrl,
-    required this.text,
-    required this.textBackgroundColor,
-    this.textColor = kPetCopyTextColor,
-    this.bubbleSeed = 0,
+    required this.metadata,
+    this.bandColor = Colors.white,
+    this.textColor = const Color(0xFF1F2937),
     required this.width,
     this.roundCorners = true,
   });
 
   @override
-  State<PetCopyExportCard> createState() => _PetCopyExportCardState();
+  State<PaletteExportCard> createState() => _PaletteExportCardState();
 }
 
-class _PetCopyExportCardState extends State<PetCopyExportCard> {
+class _PaletteExportCardState extends State<PaletteExportCard> {
   static const _frameInset = 16.0;
-  static const _textInsetVertical = 30.0;
-  static const _textInsetHorizontal = 16.0;
+  static const _metadataInsetLeft = 50.0;
+  static const _metadataInsetVertical = 25.0;
+  static const _metadataRowGap = 8.0;
   static const _fallbackAspectRatio = 3 / 4;
 
   double? _imageAspectRatio;
@@ -50,7 +48,7 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
   }
 
   @override
-  void didUpdateWidget(covariant PetCopyExportCard oldWidget) {
+  void didUpdateWidget(covariant PaletteExportCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.localPath != widget.localPath ||
         oldWidget.remoteUrl != widget.remoteUrl) {
@@ -123,7 +121,7 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
       width: widget.width,
       child: _wrapCorners(
         ColoredBox(
-          color: widget.textBackgroundColor,
+          color: widget.bandColor,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -142,33 +140,33 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
               ),
               Container(
                 width: widget.width,
-                color: widget.textBackgroundColor,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: _textInsetHorizontal,
-                  vertical: _textInsetVertical,
+                color: widget.bandColor,
+                padding: const EdgeInsets.fromLTRB(
+                  _metadataInsetLeft,
+                  _metadataInsetVertical,
+                  _frameInset,
+                  _metadataInsetVertical,
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    OrganicBubble(
-                      color: widget.textColor,
-                      seed: widget.bubbleSeed,
-                      size: 20,
+                    _MetadataRow(
+                      icon: Icons.location_on_outlined,
+                      text: widget.metadata.location,
+                      textColor: widget.textColor,
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        widget.text,
-                        textAlign: TextAlign.center,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: widget.textColor,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          height: 1.35,
-                        ),
-                      ),
+                    const SizedBox(height: _metadataRowGap),
+                    _MetadataRow(
+                      icon: Icons.schedule_outlined,
+                      text: widget.metadata.capturedAt,
+                      textColor: widget.textColor,
+                    ),
+                    const SizedBox(height: _metadataRowGap),
+                    _MetadataRow(
+                      icon: Icons.phone_iphone_outlined,
+                      text: widget.metadata.device,
+                      textColor: widget.textColor,
                     ),
                   ],
                 ),
@@ -230,6 +228,41 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
           color: Colors.white38,
         ),
       ),
+    );
+  }
+}
+
+class _MetadataRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color textColor;
+
+  const _MetadataRow({
+    required this.icon,
+    required this.text,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: textColor.withValues(alpha: 0.75)),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

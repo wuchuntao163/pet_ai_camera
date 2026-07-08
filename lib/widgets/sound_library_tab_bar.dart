@@ -32,10 +32,7 @@ class SoundLibraryTabBar extends StatelessWidget {
     required this.onTabChanged,
   });
 
-  Color _activeBg(SoundLibraryTab tab) {
-    if (tab.isRecordings) return AppColors.tabMyRecordingBg;
-    return AppColors.tabCatActiveBg;
-  }
+  Color _activeBg(SoundLibraryTab tab) => AppColors.primary;
 
   @override
   Widget build(BuildContext context) {

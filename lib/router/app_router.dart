@@ -6,6 +6,7 @@ import '../screens/ai_pet_copy_screen.dart';
 import '../screens/camera_screen.dart';
 import '../models/app_photo.dart';
 import '../screens/photo_gallery_screen.dart';
+import '../screens/photo_palette_screen.dart';
 import '../screens/photo_viewer_screen.dart';
 import '../screens/splash_screen.dart';
 import 'app_routes.dart';
@@ -50,6 +51,27 @@ GoRouter createAppRouter() {
               return _fadePage(
                 state,
                 AiPetCopyScreen(
+                  photo: photo,
+                  galleryService: AppServices.instance.photoGallery,
+                ),
+              );
+            },
+          ),
+          GoRoute(
+            path: 'palette',
+            pageBuilder: (context, state) {
+              final photo = state.extra as AppPhoto?;
+              if (photo == null) {
+                return _fadePage(
+                  state,
+                  const Scaffold(
+                    body: Center(child: Text('照片不存在')),
+                  ),
+                );
+              }
+              return _fadePage(
+                state,
+                PhotoPaletteScreen(
                   photo: photo,
                   galleryService: AppServices.instance.photoGallery,
                 ),

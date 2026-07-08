@@ -173,25 +173,20 @@ class _PetEmojiMenuState extends State<PetEmojiMenu> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          height: AppSizes.petMenuScrollHeight,
-          width: AppSizes.petMenuBtn,
+        ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxHeight: AppSizes.petMenuScrollHeight,
+          ),
           child: SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                minHeight: AppSizes.petMenuScrollHeight,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var index = 0; index < listItemCount; index++) ...[
-                    if (index > 0)
-                      const SizedBox(height: AppSizes.petMenuItemGap),
-                    _buildListItem(index, hasMoreSounds),
-                  ],
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var index = 0; index < listItemCount; index++) ...[
+                  if (index > 0)
+                    const SizedBox(height: AppSizes.petMenuItemGap),
+                  _buildListItem(index, hasMoreSounds),
                 ],
-              ),
+              ],
             ),
           ),
         ),

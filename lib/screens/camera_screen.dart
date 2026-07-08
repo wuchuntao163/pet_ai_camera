@@ -20,6 +20,7 @@ import '../widgets/capture_shutter_overlay.dart';
 import '../widgets/countdown_overlay.dart';
 import '../widgets/camera_tool_popups.dart';
 import '../services/sidebar_sound_store.dart';
+import '../services/capture_location_service.dart';
 import '../data/app_cache_store.dart';
 import '../data/camera_sound_store.dart';
 import 'settings_screen.dart';
@@ -114,14 +115,18 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _settings.removeListener(_onSettingsChanged);
+    unawaited(CaptureLocationService.instance.stop());
     _cameraService.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_isOnCameraRoute) return;
+
     if (state == AppLifecycleState.paused) {
       _lifecyclePaused = true;
+      unawaited(CaptureLocationService.instance.stop());
       _cameraService.pause();
     } else if (state == AppLifecycleState.resumed && _lifecyclePaused) {
       _lifecyclePaused = false;
@@ -134,6 +139,15 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
   }
 
+  /// 当前路由是否为相机页（在相册/调色盘等页面时不应恢复相机）
+  bool get _isOnCameraRoute {
+    if (!mounted) return false;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return false;
+    final path = GoRouter.of(context).routerDelegate.state.uri.path;
+    return path == AppRoutes.camera;
+  }
+
   AspectRatioOption get _aspectRatio =>
       AspectRatioOption.all[_aspectRatioIndex];
   BurstOption get _burst => BurstOption.all[_settings.burstIndex];
@@ -141,10 +155,15 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   double get _previewVerticalAlignY {
     if (_aspectRatio.usesFullScreenPreview) return 0.5;
-    if (Platform.isIOS && _aspectRatio.usesNativeSensorOutput) {
-      return AppSizes.ios34PreviewAlignY;
+    if (Platform.isIOS) {
+      if (_aspectRatio.usesNativeSensorOutput) {
+        return AppSizes.ios34PreviewAlignY;
+      }
+      return AppSizes.previewVerticalAlignY;
     }
-    return AppSizes.previewVerticalAlignY;
+    // Android：1:1 / 4:3 / 16:9 取景框居中；3:4 传感器直出仍贴底
+    if (_aspectRatio.usesPreviewMask) return 0.5;
+    return 1.0;
   }
 
   /// 9:16 全屏：原生 ViewPort 用屏幕比例铺满；3:4 走 contain 不设置
@@ -162,9 +181,18 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     if (_aspectRatio.usesFullScreenPreview) {
       return mq.size;
     }
-    final h = (mq.size.height -
-            AppSizes.topBarHeight -
-            AppSizes.cameraBottomChrome)
+    if (Platform.isIOS) {
+      final h = (mq.size.height -
+              AppSizes.topBarHeight -
+              AppSizes.cameraBottomChrome)
+          .clamp(1.0, mq.size.height);
+      return Size(mq.size.width, h);
+    }
+    final chrome = androidCameraChromeInsets(
+      safeTop: mq.padding.top,
+      safeBottom: mq.padding.bottom,
+    );
+    final h = (mq.size.height - chrome.top - chrome.bottom)
         .clamp(1.0, mq.size.height);
     return Size(mq.size.width, h);
   }
@@ -314,6 +342,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       await _applyFlashState(_flashState);
       await _syncPreviewModeForAspect();
       if (mounted) setState(() => _isLoading = false);
+      unawaited(CaptureLocationService.instance.start());
     } on CameraPermissionException {
       final permissionState = await _cameraService.getCameraPermissionState();
       if (mounted) {
@@ -537,6 +566,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       localPath: localPath,
       soundEffectId: soundEffectId,
     );
+
+    unawaited(CaptureLocationService.instance.stampCaptureMetadata(localPath));
   }
 
   Future<bool> _moveCaptureToReserved(String sourcePath, String destPath) async {
@@ -597,6 +628,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     await _cameraService.setZoomLevel(_currentZoom);
     await _applyFlashState(_flashState);
     await _syncPreviewModeForAspect();
+    unawaited(CaptureLocationService.instance.start());
   }
 
   Future<void> _openPhotoGallery() async {
@@ -616,6 +648,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         _cameraService.isInitialized && !_lifecyclePaused;
     if (shouldResumeCamera) {
       await _cameraService.pause();
+      unawaited(CaptureLocationService.instance.stop());
     }
 
     try {
@@ -668,18 +701,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
 
     if (Platform.isIOS) {
-      final mq = MediaQuery.of(context);
-      final areaInsets = _aspectRatio.usesNativeSensorOutput
-          ? _iosPreviewAreaInsets(mq)
-          : (top: 0.0, bottom: 0.0);
       return CameraPreviewView(
         key: const ValueKey('camera_preview_view'),
         maskRatio: _aspectRatio.usesPreviewMask || _aspectRatio.usesNativeSensorOutput
             ? _aspectRatio.ratio
             : null,
         verticalAlignY: _previewVerticalAlignY,
-        topInset: areaInsets.top,
-        bottomInset: areaInsets.bottom,
       );
     }
 

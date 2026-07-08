@@ -40,11 +40,11 @@ class CameraRecordStore extends ChangeNotifier {
     int? duration,
   }) async {
     try {
-      final fileUrl = await FileUploadService.uploadLocalImage(localFilePath);
+      final fileUrl = await FileUploadService.uploadFile(localFilePath);
       String? thumbnailUrl;
       if (thumbnailLocalPath != null && thumbnailLocalPath.isNotEmpty) {
         thumbnailUrl =
-            await FileUploadService.uploadLocalImage(thumbnailLocalPath);
+            await FileUploadService.uploadFile(thumbnailLocalPath);
       }
 
       final data = <String, dynamic>{
@@ -93,12 +93,22 @@ class CameraRecordStore extends ChangeNotifier {
   }
 
   Future<({bool ok, String msg})> deleteRecord(int recordId) async {
+    return deleteRecords([recordId]);
+  }
+
+  /// 批量删除；[recordIds] 会以 `1,2,3,4` 形式作为 record_id 一次提交
+  Future<({bool ok, String msg})> deleteRecords(Iterable<int> recordIds) async {
+    final ids = recordIds.where((id) => id > 0).toSet().toList()..sort();
+    if (ids.isEmpty) {
+      return (ok: true, msg: '');
+    }
     try {
       final res = await Api.post(
         ApiPaths.deleteCameraRecord,
-        data: {'record_id': recordId},
+        data: {'record_id': ids.join(',')},
       );
-      _records.removeWhere((e) => _asInt(e['id']) == recordId);
+      final idSet = ids.toSet();
+      _records.removeWhere((e) => idSet.contains(_asInt(e['id'])));
       notifyListeners();
       return (ok: true, msg: res.msg);
     } on ApiException catch (e) {

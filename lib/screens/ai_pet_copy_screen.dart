@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -10,6 +11,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../api/api.dart';
 import '../constants/app_colors.dart';
+import '../constants/app_images.dart';
 import '../models/app_photo.dart';
 import '../services/pet_text_service.dart';
 import '../services/photo_gallery_service.dart';
@@ -37,11 +39,9 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
   static const _pageBg = Color(0xFF0F1628);
 
   final _exportKey = GlobalKey();
-  final _bottomBarKey = GlobalKey();
+  final _textController = TextEditingController();
 
   static const _quoteBoxGap = 20.0;
-
-  double _bottomBarHeight = 0;
 
   bool _loading = true;
   bool _regenerating = false;
@@ -49,22 +49,18 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
   String? _errorMessage;
   PetTextResult? _result;
   String? _resolvedImageUrl;
+  int _bubbleSeed = 0;
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
     _generate();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateBottomBarHeight());
-  }
-
-  void _updateBottomBarHeight() {
-    final box =
-        _bottomBarKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !mounted) return;
-    final height = box.size.height;
-    if ((height - _bottomBarHeight).abs() > 0.5) {
-      setState(() => _bottomBarHeight = height);
-    }
   }
 
   Future<void> _generate() async {
@@ -83,9 +79,11 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
       setState(() {
         _result = response.result;
         _resolvedImageUrl = response.imageUrl;
+        _bubbleSeed = Random().nextInt(1 << 31);
         _loading = false;
         _regenerating = false;
       });
+      _textController.text = response.result.text;
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -198,6 +196,10 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
     }
   }
 
+  void _unfocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -206,9 +208,9 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
         backgroundColor: _pageBg,
         foregroundColor: AppColors.textOnDark,
         elevation: 0,
-        centerTitle: true,
+        centerTitle: false,
         title: const Text(
-          'AI趣味文案',
+          '它想说',
           style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,
@@ -237,7 +239,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
             height: 40,
             child: CircularProgressIndicator(
               strokeWidth: 2.5,
-              color: AppColors.recordRed,
+              color: AppColors.primary,
               backgroundColor: Colors.white.withValues(alpha: 0.12),
             ),
           ),
@@ -282,7 +284,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
             FilledButton(
               onPressed: _generate,
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.recordRed,
+                backgroundColor: AppColors.primary,
               ),
               child: const Text('重试'),
             ),
@@ -294,72 +296,133 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
 
   Widget _buildResultBody() {
     final result = _result!;
-    const horizontalInset = 16.0;
-    final width = MediaQuery.sizeOf(context).width - horizontalInset * 2;
-    final safeBottom = MediaQuery.paddingOf(context).bottom;
-    final bottomBarHeight = _bottomBarHeight > 0 ? _bottomBarHeight : 68.0;
-    final scrollBottomPadding = bottomBarHeight + safeBottom + _quoteBoxGap;
+    const contentInset = 16.0;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final contentWidth = screenWidth - contentInset * 2;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateBottomBarHeight());
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            horizontalInset,
-            0,
-            horizontalInset,
-            scrollBottomPadding,
-          ),
-          child: Column(
-            children: [
-              RepaintBoundary(
-                key: _exportKey,
-                child: PetCopyExportCard(
-                  localPath: _displayLocalPath(),
-                  remoteUrl: _displayRemoteUrl(),
-                  text: result.text,
-                  textBackgroundColor: result.backgroundColor,
-                  width: width,
-                  roundCorners: !_exportSquareCorners,
-                ),
+    return GestureDetector(
+      onTap: _unfocus,
+      behavior: HitTestBehavior.translucent,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                0,
+                24,
+                0,
+                24 + bottomInset,
               ),
-              SizedBox(height: _quoteBoxGap),
-              Container(
-                width: width,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 48 - bottomInset,
                 ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A3344),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(
-                      Icons.format_quote,
-                      color: AppColors.recordRed,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        result.text,
-                        style: TextStyle(
-                          color: AppColors.textOnDark.withValues(alpha: 0.92),
-                          fontSize: 12,
-                          height: 1.45,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: contentInset),
+                      child: RepaintBoundary(
+                        key: _exportKey,
+                        child: PetCopyExportCard(
+                          localPath: _displayLocalPath(),
+                          remoteUrl: _displayRemoteUrl(),
+                          text: _textController.text,
+                          textBackgroundColor: result.backgroundColor,
+                          bubbleSeed: _bubbleSeed,
+                          width: contentWidth,
+                          roundCorners: !_exportSquareCorners,
                         ),
+                      ),
+                    ),
+                    SizedBox(height: _quoteBoxGap),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: contentInset),
+                      child: GestureDetector(
+                        onTap: _unfocus,
+                        behavior: HitTestBehavior.translucent,
+                        child: Container(
+                          width: contentWidth,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Transform.rotate(
+                                angle: pi,
+                                child: Icon(
+                                  Icons.format_quote,
+                                  color: AppColors.textOnDark
+                                      .withValues(alpha: 0.92),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: TextField(
+                                  controller: _textController,
+                                  minLines: 1,
+                                  maxLines: null,
+                                  textAlign: TextAlign.center,
+                                  keyboardType: TextInputType.multiline,
+                                  style: TextStyle(
+                                    color: AppColors.textOnDark
+                                        .withValues(alpha: 0.92),
+                                    fontSize: 13,
+                                    height: 1.45,
+                                  ),
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    border: InputBorder.none,
+                                    hintText: '点击编辑文案',
+                                    hintStyle: TextStyle(
+                                      color: AppColors.textOnDark
+                                          .withValues(alpha: 0.35),
+                                      fontSize: 13,
+                                    ),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Icon(
+                                Icons.format_quote,
+                                color: AppColors.textOnDark
+                                    .withValues(alpha: 0.92),
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: _quoteBoxGap),
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: contentInset),
+                      child: SizedBox(
+                        width: contentWidth,
+                        child: _buildBottomActions(contentWidth),
                       ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
+            );
+          },
         ),
         if (_regenerating)
           Positioned.fill(
@@ -374,7 +437,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
                       height: 36,
                       child: CircularProgressIndicator(
                         strokeWidth: 2.5,
-                        color: AppColors.recordRed,
+                        color: AppColors.primary,
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -399,51 +462,54 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
               ),
             ),
           ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              key: _bottomBarKey,
-              padding: const EdgeInsets.only(bottom: 16),
-              child: _buildBottomActions(),
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildBottomActions() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+  Widget _buildBottomActions(double totalWidth) {
+    const gapFactor = 0.025;
+    const widthHeightRatio = 1.65;
+    final gap = totalWidth * gapFactor;
+    final buttonWidth = (totalWidth - gap * 2) / 3;
+    final buttonHeight = buttonWidth / widthHeightRatio;
+
+    return SizedBox(
+      width: totalWidth,
       child: Row(
         children: [
-          Expanded(
+          SizedBox(
+            width: buttonWidth,
+            height: buttonHeight,
             child: _ActionTile(
               label: '重新生成',
-              icon: Icons.refresh,
-              colors: const [Color(0xFF3B82F6), Color(0xFF2563EB)],
+              iconAsset: AppImages.regenerate,
+              gradientStart: AppColors.aiCopyRegenerateGradientStart,
+              gradientEnd: AppColors.aiCopyRegenerateGradientEnd,
               onTap: _regenerating ? null : _onRegenerate,
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
+          SizedBox(width: gap),
+          SizedBox(
+            width: buttonWidth,
+            height: buttonHeight,
             child: _ActionTile(
               label: '保存到相册',
-              icon: Icons.save_alt_outlined,
-              colors: const [Color(0xFFFF8FC7), Color(0xFFE91E8C)],
+              iconAsset: AppImages.save,
+              gradientStart: AppColors.aiCopySaveGradientStart,
+              gradientEnd: AppColors.aiCopySaveGradientEnd,
               onTap: _saveToGallery,
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
+          SizedBox(width: gap),
+          SizedBox(
+            width: buttonWidth,
+            height: buttonHeight,
             child: _ActionTile(
               label: '分享',
-              icon: Icons.share_outlined,
-              colors: const [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+              iconAsset: AppImages.share,
+              gradientStart: AppColors.aiCopyShareGradientStart,
+              gradientEnd: AppColors.aiCopyShareGradientEnd,
               onTap: _shareCard,
             ),
           ),
@@ -454,47 +520,74 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
 }
 
 class _ActionTile extends StatelessWidget {
+  static const _iconSize = 26.0;
+  static const _labelFontSize = 13.0;
+  static const _cornerRadius = 16.0;
+
   final String label;
-  final IconData icon;
-  final List<Color> colors;
+  final String iconAsset;
+  final Color gradientStart;
+  final Color gradientEnd;
   final VoidCallback? onTap;
 
   const _ActionTile({
     required this.label,
-    required this.icon,
-    required this.colors,
+    required this.iconAsset,
+    required this.gradientStart,
+    required this.gradientEnd,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Ink(
+    final enabled = onTap != null;
+    final start =
+        enabled ? gradientStart : gradientStart.withValues(alpha: 0.55);
+    final end = enabled ? gradientEnd : gradientEnd.withValues(alpha: 0.55);
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: double.infinity,
+        height: double.infinity,
+        child: DecoratedBox(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
             gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [start, end],
             ),
+            borderRadius: BorderRadius.circular(_cornerRadius),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Icon(icon, color: Colors.white, size: 20),
-                const SizedBox(height: 4),
+                Image.asset(
+                  iconAsset,
+                  width: _iconSize,
+                  height: _iconSize,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.image_outlined,
+                    color: Colors.white,
+                    size: _iconSize,
+                  ),
+                ),
+                const SizedBox(height: 3),
                 Text(
                   label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 11,
+                    fontSize: _labelFontSize,
                     fontWeight: FontWeight.w600,
+                    height: 1.15,
                   ),
                 ),
               ],

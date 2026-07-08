@@ -389,3 +389,87 @@ enum PhotoCropHelper {
     return CGImageDestinationFinalize(dest)
   }
 }
+
+enum PhotoExifHelper {
+  static func writeGps(to url: URL, latitude: Double, longitude: Double) -> Bool {
+    guard latitude.isFinite, longitude.isFinite else { return false }
+    guard !(latitude == 0 && longitude == 0) else { return false }
+    guard FileManager.default.fileExists(atPath: url.path) else { return false }
+
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let imageType = CGImageSourceGetType(source),
+          let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+      return false
+    }
+
+    var properties =
+      (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
+
+    let latRef = latitude >= 0 ? "N" : "S"
+    let lngRef = longitude >= 0 ? "E" : "W"
+    properties[kCGImagePropertyGPSDictionary as String] = [
+      kCGImagePropertyGPSLatitude as String: abs(latitude),
+      kCGImagePropertyGPSLatitudeRef as String: latRef,
+      kCGImagePropertyGPSLongitude as String: abs(longitude),
+      kCGImagePropertyGPSLongitudeRef as String: lngRef,
+    ]
+
+    let tempUrl = url.deletingPathExtension().appendingPathExtension("gps.tmp.jpg")
+    defer { try? FileManager.default.removeItem(at: tempUrl) }
+
+    guard let dest = CGImageDestinationCreateWithURL(tempUrl as CFURL, imageType, 1, nil) else {
+      return false
+    }
+    CGImageDestinationAddImage(dest, cgImage, properties as CFDictionary)
+    guard CGImageDestinationFinalize(dest) else { return false }
+
+    do {
+      _ = try FileManager.default.replaceItemAt(url, withItemAt: tempUrl)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  static func writeDeviceInfo(to url: URL, make: String?, model: String?) -> Bool {
+    let makeValue = make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let modelValue = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if makeValue.isEmpty && modelValue.isEmpty { return false }
+    guard FileManager.default.fileExists(atPath: url.path) else { return false }
+
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let imageType = CGImageSourceGetType(source),
+          let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+      return false
+    }
+
+    var properties =
+      (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
+
+    var tiff =
+      (properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
+    if !makeValue.isEmpty {
+      tiff[kCGImagePropertyTIFFMake as String] = makeValue
+    }
+    if !modelValue.isEmpty {
+      tiff[kCGImagePropertyTIFFModel as String] = modelValue
+    }
+    properties[kCGImagePropertyTIFFDictionary as String] = tiff
+
+    let tempUrl = url.deletingPathExtension().appendingPathExtension("device.tmp.jpg")
+    defer { try? FileManager.default.removeItem(at: tempUrl) }
+
+    guard let dest = CGImageDestinationCreateWithURL(tempUrl as CFURL, imageType, 1, nil) else {
+      return false
+    }
+    CGImageDestinationAddImage(dest, cgImage, properties as CFDictionary)
+    guard CGImageDestinationFinalize(dest) else { return false }
+
+    do {
+      _ = try FileManager.default.replaceItemAt(url, withItemAt: tempUrl)
+      return true
+    } catch {
+      return false
+    }
+  }
+}

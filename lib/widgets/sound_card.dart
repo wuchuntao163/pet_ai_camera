@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../constants/app_colors.dart';
+import '../constants/app_images.dart';
 import '../constants/app_sizes.dart';
 
 /// 音效列表卡片
@@ -9,7 +10,6 @@ class SoundCard extends StatelessWidget {
   final String name;
   final String? imageUrl;
   final String? leadingAsset;
-  final bool isRecommended;
   final bool isAdded;
   final bool isPlaying;
   final bool isToggling;
@@ -23,7 +23,6 @@ class SoundCard extends StatelessWidget {
     required this.name,
     this.imageUrl,
     this.leadingAsset,
-    this.isRecommended = false,
     this.isAdded = false,
     this.isPlaying = false,
     this.isToggling = false,
@@ -80,7 +79,7 @@ class SoundCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           _buildPlayPauseButton(),
-          if (!isRecommended) _buildAddButton(),
+          if (onToggleAdd != null) _buildAddButton(),
           if (onDelete != null) _buildDeleteButton(),
         ],
       ),
@@ -93,10 +92,13 @@ class SoundCard extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.only(left: AppSizes.soundCardActionGap),
-        child: Icon(
-          Icons.delete_outline,
-          size: _actionIconSize,
+        child: Image.asset(
+          AppImages.delete,
+          width: AppSizes.soundCardAssetActionIcon,
+          height: AppSizes.soundCardAssetActionIcon,
+          fit: BoxFit.contain,
           color: AppColors.textGray,
+          colorBlendMode: BlendMode.srcIn,
         ),
       ),
     );

@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../data/auth_session_store.dart';
 import 'api_config.dart';
 import 'api_paths.dart';
+import 'api_paths.dart';
 
 // ─────────────────────────────────────────────────────────────
 //  对外入口：先 Api.init()，再 Api.get / Api.post
@@ -539,7 +540,6 @@ bool _shouldLogApiPath(String path) {
   const allowed = [
     ApiPaths.saveCameraRecord,
     ApiPaths.addCustomSoundEffect,
-    ApiPaths.uploadLocalImage,
     ApiPaths.upload,
     ApiPaths.generatePetText,
   ];

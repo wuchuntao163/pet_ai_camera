@@ -170,4 +170,48 @@ class NativeCameraChannel {
     return NativeCameraInitResult.fromMap(map);
   }
 
+  /// 将 GPS 坐标写入 JPEG EXIF（裁切/镜像之后调用）
+  static Future<bool> writeImageGps({
+    required String path,
+    required double latitude,
+    required double longitude,
+  }) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>(
+        'writeImageGps',
+        {
+          'path': path,
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+      );
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 将设备厂商/型号写入 JPEG EXIF
+  static Future<bool> writeImageDevice({
+    required String path,
+    String? make,
+    String? model,
+  }) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>(
+        'writeImageDevice',
+        {
+          'path': path,
+          if (make != null && make.isNotEmpty) 'make': make,
+          if (model != null && model.isNotEmpty) 'model': model,
+        },
+      );
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
 }

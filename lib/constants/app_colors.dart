@@ -15,6 +15,20 @@ class AppColors {
   /// 主题红色（录制按钮）
   static const Color recordRed = Color(0xFFE91E63);
 
+  /// 删除确认等危险操作文字色（正红）
+  static const Color deleteRed = Color(0xFFFF0000);
+
+  /// 大图页「调色盘 / 它想说」按钮背景
+  static const Color paletteActionBg = Color(0xFFA3948C);
+
+  /// 它想说底部按钮渐变
+  static const Color aiCopyRegenerateGradientStart = Color(0xFFAAD6FA);
+  static const Color aiCopyRegenerateGradientEnd = Color(0xFF86B4ED);
+  static const Color aiCopySaveGradientStart = Color(0xFFC7E8BC);
+  static const Color aiCopySaveGradientEnd = Color(0xFFBAE8C7);
+  static const Color aiCopyShareGradientStart = Color(0xFFF7B7C0);
+  static const Color aiCopyShareGradientEnd = Color(0xFFD6B3E9);
+
   // --- 背景色 ---
   /// 相机界面纯黑背景
   static const Color cameraBg = Color(0xFF000000);
@@ -89,11 +103,11 @@ class AppColors {
   static const Color bottomBarBg = Color(0xD9000000);
 
   // --- 音效库专用 ---
-  /// 我的录制标签激活背景
-  static const Color tabMyRecordingBg = Color(0xFFE91E63);
+  /// 我的录制标签激活背景（与分类 Tab 选中色一致）
+  static const Color tabMyRecordingBg = primary;
 
-  /// 萌宠猫猫标签激活背景
-  static const Color tabCatActiveBg = Color(0xFFF97316);
+  /// 萌宠分类标签激活背景
+  static const Color tabCatActiveBg = primary;
 
   /// 音效库标签文字（激活态）
   static const Color tabTextActive = Color(0xFFFFFFFF);
@@ -107,11 +121,11 @@ class AppColors {
   /// 音效卡片文字
   static const Color soundCardTitle = Color(0xFF334155);
 
-  /// 紫色音符图标
-  static const Color notePurple = Color(0xFF9333EA);
+  /// 音效卡片播放按钮（与主题选中色一致）
+  static const Color notePurple = primary;
 
-  /// 我的录制标签页背景色
-  static const Color myRecordingBg = Color(0xFFE91E63);
+  /// 「录制新音效」按钮背景
+  static const Color myRecordingBg = primary;
 
   /// 音效库标签非激活边框
   static const Color tabInactiveBorder = Color(0xFFE5E7EB);

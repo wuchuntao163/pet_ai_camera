@@ -97,10 +97,13 @@ class RecordedSoundCard extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               child: Padding(
                 padding: const EdgeInsets.only(left: AppSizes.soundCardActionGap),
-                child: Icon(
-                  Icons.delete_outline,
-                  size: AppSizes.soundCardActionIcon,
+                child: Image.asset(
+                  AppImages.delete,
+                  width: AppSizes.soundCardAssetActionIcon,
+                  height: AppSizes.soundCardAssetActionIcon,
+                  fit: BoxFit.contain,
                   color: AppColors.textGray,
+                  colorBlendMode: BlendMode.srcIn,
                 ),
               ),
             ),

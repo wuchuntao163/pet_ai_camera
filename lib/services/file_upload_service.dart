@@ -9,25 +9,11 @@ import '../api/api.dart';
 class FileUploadService {
   FileUploadService._();
 
-  static Future<String> uploadLocalImage(String localPath) async {
-    return uploadFile(localPath, type: 'image');
-  }
-
-  /// 上传自定义音效音频，返回可用于 [sound_url] 的完整 URL
-  static Future<String> uploadAudio(String localPath) async {
-    return uploadFile(
-      localPath,
-      type: 'audio',
-      path: 'sound',
-    );
-  }
-
   static Future<String> uploadFile(
     String localPath, {
     String type = 'image',
     String? path,
   }) async {
-    final uploadPath = type == 'image' ? ApiPaths.uploadLocalImage : ApiPaths.upload;
     final fields = <String, dynamic>{'type': type};
     if (path != null && path.isNotEmpty) {
       fields['path'] = path;
@@ -44,7 +30,7 @@ class FileUploadService {
         // );
       }
       res = await Api.upload(
-        uploadPath,
+        ApiPaths.upload,
         filePath: localPath,
         filename: p.basename(localPath),
         fields: fields,
@@ -69,6 +55,15 @@ class FileUploadService {
       throw ApiException.business(0, '文件上传失败');
     }
     return resolveUrl(url);
+  }
+
+  /// 上传自定义音效音频，返回可用于 [sound_url] 的完整 URL
+  static Future<String> uploadAudio(String localPath) async {
+    return uploadFile(
+      localPath,
+      type: 'audio',
+      path: 'sound',
+    );
   }
 
   static String resolveUrl(String url) {

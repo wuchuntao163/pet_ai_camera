@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -11,6 +9,7 @@ import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
 import '../widgets/ai_fun_copy_button.dart';
 import '../widgets/app_photo_image.dart';
+import '../widgets/gallery_app_bar_action.dart';
 import '../widgets/toast_message.dart';
 
 /// 单张/多张照片查看（左右滑动）
@@ -47,9 +46,14 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
     super.dispose();
   }
 
-  void _onAiFunCopy() {
+  void _onWantToSay() {
     if (_photos.isEmpty) return;
     context.push(AppRoutes.aiPetCopy, extra: _photos[_currentIndex]);
+  }
+
+  void _onPalette() {
+    if (_photos.isEmpty) return;
+    context.push(AppRoutes.photoPalette, extra: _photos[_currentIndex]);
   }
 
   Future<void> _confirmDelete() async {
@@ -63,22 +67,29 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
           '删除照片',
           style: TextStyle(color: AppColors.textOnDark),
         ),
-        content: Text(
-          Platform.isIOS
-              ? '将从本应用删除这张照片，确定吗？'
-              : '将从本应用和系统相册中删除这张照片，确定吗？',
-          style: const TextStyle(color: AppColors.textHint),
+        content: const Text(
+          '将从本应用和系统相册中删除这张照片，确定吗？',
+          style: TextStyle(color: AppColors.textHint),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            child: const Text(
+              '取消',
+              style: TextStyle(
+                color: AppColors.textOnDark,
+                fontSize: 16,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text(
               '删除',
-              style: TextStyle(color: AppColors.recordRed),
+              style: TextStyle(
+                color: AppColors.deleteRed,
+                fontSize: 16,
+              ),
             ),
           ),
         ],
@@ -151,18 +162,13 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
           onPressed: () => context.pop(),
         ),
         actions: [
-          IconButton(
+          GalleryAppBarAction(
+            assetPath: AppImages.share,
             tooltip: '分享',
             onPressed: _shareCurrent,
-            icon: Image.asset(
-              AppImages.galleryShare,
-              width: 22,
-              height: 22,
-              fit: BoxFit.contain,
-            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
+          GalleryAppBarAction(
+            assetPath: AppImages.delete,
             tooltip: '删除',
             onPressed: _confirmDelete,
           ),
@@ -192,8 +198,9 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
             left: 0,
             right: 0,
             bottom: bottomInset + 20,
-            child: Center(
-              child: AiFunCopyButton(onTap: _onAiFunCopy),
+            child: PhotoViewerBottomActions(
+              onPalette: _onPalette,
+              onWantToSay: _onWantToSay,
             ),
           ),
         ],

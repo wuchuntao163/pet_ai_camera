@@ -7,7 +7,7 @@ import '../constants/app_colors.dart';
 import '../services/system_photo_picker_service.dart';
 import '../widgets/toast_message.dart';
 
-/// 系统相册选图（单张，用于 AI 趣味文案）
+/// 系统相册选图（单张，用于相册上传或页面内替换图片）
 class SystemPhotoPickerScreen extends StatefulWidget {
   const SystemPhotoPickerScreen({super.key});
 
@@ -79,7 +79,7 @@ class _SystemPhotoPickerScreenState extends State<SystemPhotoPickerScreen> {
         backgroundColor: AppColors.cameraBg,
         foregroundColor: AppColors.textOnDark,
         elevation: 0,
-        title: const Text('选择照片'),
+        title: const Text('从相册上传'),
         leading: IconButton(
           icon: const Icon(Icons.close, size: 22),
           onPressed: _processing ? null : () => Navigator.of(context).pop(),
@@ -92,7 +92,7 @@ class _SystemPhotoPickerScreenState extends State<SystemPhotoPickerScreen> {
             const ColoredBox(
               color: Color(0x66000000),
               child: Center(
-                child: CircularProgressIndicator(color: AppColors.recordRed),
+                child: CircularProgressIndicator(color: AppColors.primary),
               ),
             ),
         ],
@@ -103,7 +103,7 @@ class _SystemPhotoPickerScreenState extends State<SystemPhotoPickerScreen> {
   Widget _buildBody() {
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(color: AppColors.recordRed),
+        child: CircularProgressIndicator(color: AppColors.primary),
       );
     }
 
@@ -126,7 +126,7 @@ class _SystemPhotoPickerScreenState extends State<SystemPhotoPickerScreen> {
               FilledButton(
                 onPressed: _loadAssets,
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.recordRed,
+                  backgroundColor: AppColors.primary,
                 ),
                 child: const Text('重试'),
               ),

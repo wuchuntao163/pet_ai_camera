@@ -85,12 +85,21 @@ class NativeCameraController private constructor(private val appContext: Context
 
     fun attachPreview(previewView: PreviewView, lifecycleOwner: LifecycleOwner) {
         this.lifecycleOwner = lifecycleOwner
+        if (pendingPreviewView != null && pendingPreviewView !== previewView) {
+            detachPreview(pendingPreviewView!!)
+        }
         pendingPreviewView = previewView
         applyPreviewScaleType()
         previewUseCase?.setSurfaceProvider(previewView.surfaceProvider)
         if (camera == null && cameraProvider != null) {
             bindUseCases(null)
         }
+    }
+
+    fun detachPreview(previewView: PreviewView) {
+        if (pendingPreviewView !== previewView) return
+        pendingPreviewView = null
+        pause()
     }
 
     fun setPreviewMode(
@@ -122,6 +131,9 @@ class NativeCameraController private constructor(private val appContext: Context
     }
 
     fun pause() {
+        previewUseCase?.setSurfaceProvider { request ->
+            request.willNotProvideSurface()
+        }
         cameraProvider?.unbindAll()
         camera = null
         previewUseCase = null
@@ -348,7 +360,8 @@ class NativeCameraController private constructor(private val appContext: Context
         val zoomState = camera?.cameraInfo?.zoomState?.value
         minZoom = zoomState?.minZoomRatio?.toDouble() ?: 1.0
         maxZoom = zoomState?.maxZoomRatio?.toDouble() ?: max(minZoom, 10.0)
-        baselineOneX = if (minZoom < 1.0) minZoom else 1.0
+        // 多摄机型（如小米）minZoom 可能 < 1（超广角）；UI「1X」应对应主摄 1.0，而非最广角
+        baselineOneX = 1.0.coerceIn(minZoom, maxZoom)
         currentZoom = baselineOneX.toFloat()
         camera?.cameraControl?.setZoomRatio(currentZoom)
 

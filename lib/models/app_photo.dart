@@ -6,6 +6,7 @@ class AppPhoto {
   final int createdAtMs;
   final int? recordId;
   final String? remoteUrl;
+  final bool fromAlbumUpload;
 
   const AppPhoto({
     required this.id,
@@ -14,6 +15,7 @@ class AppPhoto {
     required this.createdAtMs,
     this.recordId,
     this.remoteUrl,
+    this.fromAlbumUpload = false,
   });
 
   bool get hasLocalFile => localPath.isNotEmpty;
@@ -44,6 +46,7 @@ class AppPhoto {
       createdAtMs: json['createdAtMs'] as int,
       recordId: _readInt(json['recordId']),
       remoteUrl: json['remoteUrl'] as String?,
+      fromAlbumUpload: json['fromAlbumUpload'] as bool? ?? false,
     );
   }
 
@@ -54,6 +57,7 @@ class AppPhoto {
         'createdAtMs': createdAtMs,
         if (recordId != null) 'recordId': recordId,
         if (remoteUrl != null) 'remoteUrl': remoteUrl,
+        if (fromAlbumUpload) 'fromAlbumUpload': fromAlbumUpload,
       };
 
   AppPhoto copyWith({
@@ -63,6 +67,7 @@ class AppPhoto {
     int? createdAtMs,
     int? recordId,
     String? remoteUrl,
+    bool? fromAlbumUpload,
     bool clearRecordId = false,
     bool clearRemoteUrl = false,
   }) {
@@ -73,6 +78,7 @@ class AppPhoto {
       createdAtMs: createdAtMs ?? this.createdAtMs,
       recordId: clearRecordId ? null : (recordId ?? this.recordId),
       remoteUrl: clearRemoteUrl ? null : (remoteUrl ?? this.remoteUrl),
+      fromAlbumUpload: fromAlbumUpload ?? this.fromAlbumUpload,
     );
   }
 

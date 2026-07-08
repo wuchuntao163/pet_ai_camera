@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -14,8 +15,24 @@ class SoundRecordingService {
   final AudioPlayer _player = AudioPlayer();
 
   String? _filePath;
+  bool _previewPlaying = false;
+  final StreamController<bool> _previewPlayingController =
+      StreamController<bool>.broadcast();
+
+  SoundRecordingService() {
+    _player.onPlayerStateChanged.listen((state) {
+      final playing = state == PlayerState.playing;
+      if (_previewPlaying == playing) return;
+      _previewPlaying = playing;
+      _previewPlayingController.add(playing);
+    });
+  }
 
   String? get filePath => _filePath;
+
+  bool get isPreviewPlaying => _previewPlaying;
+
+  Stream<bool> get previewPlayingStream => _previewPlayingController.stream;
 
   Future<bool> ensurePermission() async {
     var status = await Permission.microphone.status;
@@ -65,15 +82,27 @@ class SoundRecordingService {
     await cancel();
   }
 
-  Future<void> playPreview() async {
+  Future<void> playPreview() => togglePreview();
+
+  Future<void> togglePreview() async {
     final path = _filePath;
     if (path == null || !await File(path).exists()) return;
-    await _player.stop();
+
+    if (_player.state == PlayerState.playing) {
+      await _player.pause();
+      return;
+    }
+    if (_player.state == PlayerState.paused) {
+      await _player.resume();
+      return;
+    }
     await _player.play(DeviceFileSource(path));
   }
 
   Future<void> stopPlayback() async {
     await _player.stop();
+    _previewPlaying = false;
+    _previewPlayingController.add(false);
   }
 
   Future<void> dispose() async {
@@ -81,5 +110,6 @@ class SoundRecordingService {
     await cancel();
     await _recorder.dispose();
     await _player.dispose();
+    await _previewPlayingController.close();
   }
 }

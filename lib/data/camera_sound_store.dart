@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../api/api.dart';
 import '../services/file_upload_service.dart';
+import 'app_cache_store.dart';
 
 /// 相机音效：分类、列表、自定义音效、排序
 class CameraSoundStore extends ChangeNotifier {
@@ -51,7 +52,7 @@ class CameraSoundStore extends ChangeNotifier {
 
   List<Map<String, dynamic>> get allEffects => List.unmodifiable(_allEffects);
 
-  /// 相机右侧栏：推荐音效 + 用户已添加（has_user_sort != 0），顺序与 getSoundEffects 全量列表一致
+  /// 相机右侧栏：has_user_sort != 0 的音效，顺序与 getSoundEffects 全量列表一致
   List<Map<String, dynamic>> get sidebarEffects {
     final byId = _effectsById();
     final result = <Map<String, dynamic>>[];
@@ -59,7 +60,7 @@ class CameraSoundStore extends ChangeNotifier {
       final id = _asInt(raw['id']);
       if (id <= 0) continue;
       final effect = byId[id] ?? raw;
-      if (isRecommended(effect) || isUserAdded(effect)) {
+      if (isUserAdded(effect)) {
         result.add(effect);
       }
     }
@@ -106,8 +107,8 @@ class CameraSoundStore extends ChangeNotifier {
 
   bool isUserAdded(Map<String, dynamic> effect) => hasUserSortOf(effect) != 0;
 
-  static bool canToggleSidebar(Map<String, dynamic> effect) =>
-      !isRecommended(effect);
+  /// 是否出现在相机右侧栏（与列表勾/加一致，均看 has_user_sort）
+  bool isInSidebar(Map<String, dynamic> effect) => isUserAdded(effect);
 
   int hasUserSortOf(Map<String, dynamic> effect) {
     final id = _asInt(effect['id']);
@@ -201,10 +202,6 @@ class CameraSoundStore extends ChangeNotifier {
   Future<({bool ok, String msg})> toggleSidebarEffect(
     Map<String, dynamic> effect,
   ) async {
-    if (!canToggleSidebar(effect)) {
-      return (ok: false, msg: '');
-    }
-
     final effectId = _asInt(effect['id']);
     if (effectId <= 0) return (ok: false, msg: '');
 
@@ -344,7 +341,18 @@ class CameraSoundStore extends ChangeNotifier {
       final effectId = _asInt(
         res.data is Map ? res.data['effect_id'] : null,
       );
-      await refreshSidebarEffects();
+      if (effectId > 0) {
+        _insertCustomEffectLocally(
+          effectId: effectId,
+          name: name,
+          soundUrl: soundUrl,
+          categoryId: cid,
+          imageUrl: imageUrl,
+        );
+      }
+      await refreshSidebarEffects(
+        languageId: AppCacheStore.instance.defaultLanguageId,
+      );
       return (ok: true, msg: res.msg, effectId: effectId > 0 ? effectId : null);
     } on ApiException catch (e) {
       if (kDebugMode) {
@@ -352,6 +360,38 @@ class CameraSoundStore extends ChangeNotifier {
       }
       return (ok: false, msg: e.message, effectId: null);
     }
+  }
+
+  void _insertCustomEffectLocally({
+    required int effectId,
+    required String name,
+    required String soundUrl,
+    required int categoryId,
+    String? imageUrl,
+  }) {
+    final newEffect = _normalizeEffect({
+      'id': effectId,
+      'name': name,
+      'sound_url': soundUrl,
+      'category_id': categoryId,
+      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+      'has_user_sort': 0,
+      'is_recommend': 0,
+    });
+
+    _customEffects = [
+      newEffect,
+      ..._customEffects.where((e) => _asInt(e['id']) != effectId),
+    ];
+
+    final categoryEffects = _effectsByCategory[categoryId] ?? [];
+    _effectsByCategory[categoryId] = [
+      newEffect,
+      ...categoryEffects.where((e) => _asInt(e['id']) != effectId),
+    ];
+
+    _mergeEffectsIntoAll([newEffect]);
+    notifyListeners();
   }
 
   Future<({bool ok, String msg})> deleteCustomSoundEffect(int effectId) async {

@@ -6,7 +6,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../models/app_photo.dart';
 
-/// 从系统相册选图，供 AI 趣味文案等临时流程使用（不写入 App 相册索引）
+/// 从系统相册读取照片（复制到应用临时目录）
 class SystemPhotoPickerService {
   SystemPhotoPickerService._();
 
@@ -40,11 +40,12 @@ class SystemPhotoPickerService {
     );
     await File(source.path).copy(destPath);
 
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final capturedAt = asset.createDateTime.millisecondsSinceEpoch;
     return AppPhoto(
-      id: 'pick_$now',
+      id: 'pick_$capturedAt',
       localPath: destPath,
-      createdAtMs: now,
+      galleryAssetId: asset.id,
+      createdAtMs: capturedAt,
     );
   }
 }

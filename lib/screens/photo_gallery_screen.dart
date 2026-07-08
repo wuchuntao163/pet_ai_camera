@@ -10,6 +10,7 @@ import '../router/app_routes.dart';
 import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
 import '../widgets/app_photo_image.dart';
+import '../widgets/gallery_app_bar_action.dart';
 import '../widgets/toast_message.dart';
 import 'system_photo_picker_screen.dart';
 
@@ -27,6 +28,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
   List<AppPhoto> _photos = [];
   bool _isBatchMode = false;
   bool _isLoading = true;
+  bool _isUploading = false;
   final Set<String> _selectedIds = {};
 
   @override
@@ -127,61 +129,81 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     if (mounted) setState(_syncPhotos);
   }
 
-  Future<void> _pickSystemPhotoForAiCopy() async {
-    if (_isBatchMode) return;
+  Future<void> _uploadFromSystemGallery() async {
+    if (_isBatchMode || _isUploading) return;
 
     final granted = await widget.galleryService.ensurePermission();
     if (!mounted) return;
     if (!granted) {
-      ToastMessage.show(context, '需要相册权限才能选择照片');
+      ToastMessage.show(context, '需要相册权限才能上传照片');
       return;
     }
 
-    final photo = await Navigator.of(context).push<AppPhoto>(
+    final picked = await Navigator.of(context).push<AppPhoto>(
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => const SystemPhotoPickerScreen(),
       ),
     );
-    if (!mounted) return;
-    if (photo == null) return;
+    if (!mounted || picked == null) return;
 
-    context.push(AppRoutes.aiPetCopy, extra: photo);
+    setState(() => _isUploading = true);
+    try {
+      final result = await widget.galleryService.importFromSystemAlbum(
+        picked.localPath,
+      );
+      if (!mounted) return;
+      if (!result.ok) {
+        ToastMessage.show(context, result.msg);
+        return;
+      }
+      setState(_syncPhotos);
+      ToastMessage.show(context, '上传成功');
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
   }
 
-  Widget _buildAiCopyPickEntry() {
+  Widget _buildAlbumUploadEntry() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: _pickSystemPhotoForAiCopy,
+          onTap: _uploadFromSystemGallery,
           borderRadius: BorderRadius.circular(14),
           child: Ink(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               color: const Color(0xFF1C2438),
               border: Border.all(
-                color: AppColors.recordRed.withValues(alpha: 0.35),
+                color: AppColors.primary.withValues(alpha: 0.35),
               ),
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  Container(
+                  SizedBox(
                     width: 40,
                     height: 40,
-                    decoration: BoxDecoration(
+                    child: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFFF8FC7), Color(0xFFE91E8C)],
+                      child: Image.asset(
+                        AppImages.xiangce,
+                        width: 40,
+                        height: 40,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                        errorBuilder: (_, __, ___) => ColoredBox(
+                          color: AppColors.primary,
+                          child: const Icon(
+                            Icons.photo_library_outlined,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
                       ),
-                    ),
-                    child: const Icon(
-                      Icons.photo_library_outlined,
-                      color: Colors.white,
-                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -190,7 +212,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          '从相册选图',
+                          '从相册上传',
                           style: TextStyle(
                             color: AppColors.textOnDark,
                             fontSize: 15,
@@ -199,7 +221,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '选择手机照片生成 AI 趣味文案',
+                          '上传相册照片使用编辑功能',
                           style: TextStyle(
                             color: AppColors.textOnDark.withValues(alpha: 0.55),
                             fontSize: 12,
@@ -225,7 +247,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     return CustomScrollView(
       slivers: [
         if (!_isBatchMode)
-          SliverToBoxAdapter(child: _buildAiCopyPickEntry()),
+          SliverToBoxAdapter(child: _buildAlbumUploadEntry()),
         if (_photos.isEmpty)
           SliverFillRemaining(
             hasScrollBody: false,
@@ -307,13 +329,22 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            child: const Text(
+              '取消',
+              style: TextStyle(
+                color: AppColors.textOnDark,
+                fontSize: 16,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text(
               '删除',
-              style: TextStyle(color: AppColors.recordRed),
+              style: TextStyle(
+                color: AppColors.deleteRed,
+                fontSize: 16,
+              ),
             ),
           ),
         ],
@@ -383,17 +414,14 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     required String tooltip,
     required Key key,
     VoidCallback? onPressed,
+    double opacity = 1,
   }) {
-    return IconButton(
-      key: key,
+    return GalleryAppBarAction(
+      actionKey: key,
+      assetPath: assetPath,
       tooltip: tooltip,
       onPressed: onPressed,
-      icon: Image.asset(
-        assetPath,
-        width: 22,
-        height: 22,
-        fit: BoxFit.contain,
-      ),
+      opacity: opacity,
     );
   }
 
@@ -447,24 +475,30 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                 tooltip: '分享选中',
                 onPressed: _shareSelected,
               ),
-            IconButton(
+            _assetAction(
               key: const Key('gallery_delete_selected'),
+              assetPath: AppImages.delete,
               tooltip: '删除选中',
               onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
-              icon: Icon(
-                Icons.delete_outline,
-                size: 22,
-                color: _selectedIds.isEmpty
-                    ? AppColors.textHint
-                    : AppColors.recordRed,
-              ),
+              opacity: _selectedIds.isEmpty ? 0.35 : 1,
             ),
           ],
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _buildGalleryContent(),
+      body: Stack(
+        children: [
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _buildGalleryContent(),
+          if (_isUploading)
+            const ColoredBox(
+              color: Color(0x66000000),
+              child: Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

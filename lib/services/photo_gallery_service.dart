@@ -25,6 +25,7 @@ class PhotoGalleryService {
   List<AppPhoto> _cloudGalleryPhotos = [];
   final Map<int, String> _galleryAssetByRecordId = {};
   final Map<int, String> _captureIdByRecordId = {};
+  final Set<int> _albumUploadRecordIds = {};
   bool _loaded = false;
   int _saveSeq = 0;
   Directory? _cachedPhotosDir;
@@ -148,11 +149,16 @@ class PhotoGalleryService {
       _photos.insert(0, photo);
     }
     unawaited(_persistIndex());
+    if (upload) {
+      final uploaded =
+          await uploadRecordForPhoto(id, soundEffectId: soundEffectId);
+      if (syncToGallery) {
+        await syncToSystemGallery(id);
+      }
+      return uploaded;
+    }
     if (syncToGallery) {
       unawaited(syncToSystemGallery(id));
-    }
-    if (upload) {
-      return await uploadRecordForPhoto(id, soundEffectId: soundEffectId);
     }
     return true;
   }
@@ -229,6 +235,51 @@ class PhotoGalleryService {
     unawaited(_persistIndex());
     unawaited(uploadRecordForPhoto(id, soundEffectId: soundEffectId));
     return photo;
+  }
+
+  /// 从系统相册导入：落盘并 saveCameraRecord；不写入系统相册
+  Future<({bool ok, String msg})> importFromSystemAlbum(String tempPath) async {
+    await init();
+    final tempFile = File(tempPath);
+    if (!await tempFile.exists()) {
+      return (ok: false, msg: '保存照片失败');
+    }
+
+    final slot = await acquireCaptureSlot();
+    try {
+      try {
+        await tempFile.rename(slot.path);
+      } catch (_) {
+        await tempFile.copy(slot.path);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
+    } catch (_) {
+      return (ok: false, msg: '保存照片失败');
+    }
+
+    final uploaded = await registerCapture(
+      id: slot.id,
+      localPath: slot.path,
+      syncToGallery: false,
+    );
+    if (!uploaded) {
+      return (ok: false, msg: '保存记录失败，请重试');
+    }
+
+    final index = _photos.indexWhere((item) => item.id == slot.id);
+    if (index < 0 || _photos[index].recordId == null) {
+      return (ok: false, msg: '保存记录失败，请重试');
+    }
+
+    final recordId = _photos[index].recordId!;
+    _photos[index] = _photos[index].copyWith(fromAlbumUpload: true);
+    _rememberAlbumUpload(recordId);
+    await _persistIndex();
+
+    await refreshFromServer();
+    return (ok: true, msg: '');
   }
 
   /// 上传本地照片并调用 saveCameraRecord；成功则写入云端相册列表
@@ -460,19 +511,54 @@ class PhotoGalleryService {
     return (ok: true, msg: msg);
   }
 
-  /// 批量删除，返回成功删除的数量与最后一条接口 msg
+  /// 批量删除，返回成功删除的数量与接口 msg（云端记录一次接口调用）
   Future<({int deleted, String msg})> deletePhotos(List<String> ids) async {
-    var deleted = 0;
-    var msg = '';
-    for (final id in ids) {
-      final result = await deletePhoto(id);
-      if (!result.ok) {
-        return (deleted: deleted, msg: result.msg);
-      }
-      deleted++;
-      if (result.msg.isNotEmpty) msg = result.msg;
+    await init();
+    if (ids.isEmpty) {
+      return (deleted: 0, msg: '');
     }
-    return (deleted: deleted, msg: msg);
+
+    final photos = <AppPhoto>[];
+    for (final id in ids) {
+      final cloudIndex =
+          _cloudGalleryPhotos.indexWhere((photo) => photo.id == id);
+      if (cloudIndex < 0) {
+        return (deleted: 0, msg: '照片不存在');
+      }
+      photos.add(_cloudGalleryPhotos[cloudIndex]);
+    }
+
+    final recordIds = <int>{};
+    for (final photo in photos) {
+      final recordId = await _resolveDeleteRecordId(photo);
+      if (recordId != null && recordId > 0) {
+        recordIds.add(recordId);
+      }
+    }
+
+    var msg = '';
+    if (recordIds.isNotEmpty) {
+      final result = await CameraRecordStore.instance.deleteRecords(recordIds);
+      if (!result.ok) {
+        return (deleted: 0, msg: result.msg);
+      }
+      msg = result.msg;
+    }
+
+    for (final photo in photos) {
+      final cloudIndex =
+          _cloudGalleryPhotos.indexWhere((item) => item.id == photo.id);
+      if (cloudIndex >= 0) {
+        _cloudGalleryPhotos.removeAt(cloudIndex);
+      }
+      await _removeLocalPhotosLinkedTo(photo);
+      final cacheRecordId = photo.serverRecordId;
+      if (cacheRecordId != null && cacheRecordId > 0) {
+        await _deleteCacheForRecord(cacheRecordId);
+      }
+    }
+    await _persistCloudGalleryIndex();
+    return (deleted: photos.length, msg: msg);
   }
 
   /// 删除全部照片：先调 deleteAllCameraRecords，再清云端列表与关联本地缓存
@@ -519,10 +605,12 @@ class PhotoGalleryService {
 
   Future<void> _removeLocalPhotosLinkedTo(
     AppPhoto cloudPhoto, {
-    bool deleteSystemGallery = true,
+    bool? deleteSystemGallery,
   }) async {
     final recordId = cloudPhoto.serverRecordId;
     final linked = _linkedLocalPhotos(cloudPhoto);
+    final shouldDeleteFromSystemGallery = deleteSystemGallery ??
+        !_isAlbumImportRecord(recordId);
 
     final assetIds = _collectGalleryAssetIds(
       cloudPhoto: cloudPhoto,
@@ -532,7 +620,7 @@ class PhotoGalleryService {
       cloudPhoto: cloudPhoto,
       linked: linked,
     );
-    if (deleteSystemGallery) {
+    if (shouldDeleteFromSystemGallery) {
       await _deleteFromSystemGallery(
         assetIds: assetIds,
         captureIds: captureIds,
@@ -542,6 +630,7 @@ class PhotoGalleryService {
     if (recordId != null && recordId > 0) {
       _forgetGalleryAsset(recordId);
       _forgetCaptureId(recordId);
+      _forgetAlbumUpload(recordId);
     }
 
     for (final photo in linked) {
@@ -601,8 +690,8 @@ class PhotoGalleryService {
 
     final validCaptureIds =
         captureIds.where(_isCapturePhotoId).toSet();
-    var ids = Set<String>.from(assetIds);
-    if (ids.isEmpty) return true;
+    final ids = Set<String>.from(assetIds);
+    if (ids.isEmpty && validCaptureIds.isEmpty) return true;
 
     if (!await ensurePermission()) return false;
 
@@ -754,10 +843,30 @@ class PhotoGalleryService {
     unawaited(_persistGalleryAssetMap());
   }
 
+  bool _isAlbumImportRecord(int? recordId) {
+    if (recordId == null || recordId <= 0) return false;
+    if (_albumUploadRecordIds.contains(recordId)) return true;
+    return _findLocalPhotoByRecordId(recordId)?.fromAlbumUpload ?? false;
+  }
+
+  void _rememberAlbumUpload(int recordId) {
+    _albumUploadRecordIds.add(recordId);
+    unawaited(_persistGalleryAssetMap());
+  }
+
+  void _forgetAlbumUpload(int recordId) {
+    if (!_albumUploadRecordIds.contains(recordId)) return;
+    _albumUploadRecordIds.remove(recordId);
+    unawaited(_persistGalleryAssetMap());
+  }
+
   void _rebuildGalleryAssetMapFromPhotos() {
     for (final photo in _photos) {
       final recordId = photo.recordId;
       if (recordId == null || recordId <= 0) continue;
+      if (photo.fromAlbumUpload) {
+        _albumUploadRecordIds.add(recordId);
+      }
       final assetId = photo.galleryAssetId;
       if (assetId != null && assetId.isNotEmpty) {
         _galleryAssetByRecordId[recordId] = assetId;
@@ -776,7 +885,19 @@ class PhotoGalleryService {
 
       final raw = jsonDecode(await mapFile.readAsString());
       if (raw is! Map) return;
+
+      final albumUploadIds = raw['__albumUploadRecordIds__'];
+      if (albumUploadIds is List) {
+        for (final id in albumUploadIds) {
+          final recordId = _asInt(id);
+          if (recordId > 0) {
+            _albumUploadRecordIds.add(recordId);
+          }
+        }
+      }
+
       raw.forEach((key, value) {
+        if (key == '__albumUploadRecordIds__') return;
         final recordId = int.tryParse(key.toString());
         if (recordId == null || recordId <= 0) return;
 
@@ -805,6 +926,10 @@ class PhotoGalleryService {
       final base = await getApplicationDocumentsDirectory();
       final mapFile = File(p.join(base.path, _galleryAssetMapFileName));
       final encoded = <String, dynamic>{};
+      if (_albumUploadRecordIds.isNotEmpty) {
+        encoded['__albumUploadRecordIds__'] =
+            _albumUploadRecordIds.toList()..sort();
+      }
       final recordIds = {
         ..._galleryAssetByRecordId.keys,
         ..._captureIdByRecordId.keys,
@@ -924,6 +1049,12 @@ class PhotoGalleryService {
             assetId != null &&
             assetId.isNotEmpty) {
           _galleryAssetByRecordId[recordId] = assetId;
+        }
+        if (recordId != null && recordId > 0 && photo.id.isNotEmpty) {
+          _captureIdByRecordId[recordId] = photo.id;
+        }
+        if (recordId != null && recordId > 0 && photo.fromAlbumUpload) {
+          _albumUploadRecordIds.add(recordId);
         }
         if (recordId != null && recordId > 0 && photo.id.isNotEmpty) {
           _captureIdByRecordId[recordId] = photo.id;

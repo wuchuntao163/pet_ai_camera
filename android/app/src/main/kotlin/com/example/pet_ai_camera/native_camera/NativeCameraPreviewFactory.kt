@@ -26,6 +26,8 @@ class NativeCameraPlatformView(context: Context) : PlatformView {
         )
     }
 
+    private val controller = NativeCameraController.getInstance(context)
+
     private val container = FrameLayout(context).apply {
         setBackgroundColor(Color.TRANSPARENT)
         layoutParams = FrameLayout.LayoutParams(
@@ -38,12 +40,13 @@ class NativeCameraPlatformView(context: Context) : PlatformView {
     init {
         val activity = NativeCameraPlugin.currentActivity
         if (activity != null) {
-            NativeCameraController.getInstance(context)
-                .attachPreview(previewView, activity)
+            controller.attachPreview(previewView, activity)
         }
     }
 
     override fun getView() = container
 
-    override fun dispose() {}
+    override fun dispose() {
+        controller.detachPreview(previewView)
+    }
 }

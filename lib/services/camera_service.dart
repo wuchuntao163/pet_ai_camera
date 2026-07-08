@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' show Rect;
 
+import 'dart:typed_data';
+
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/camera_config.dart';

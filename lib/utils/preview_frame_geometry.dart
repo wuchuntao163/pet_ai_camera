@@ -16,6 +16,17 @@ import '../constants/app_sizes.dart';
   return (top: top, bottom: bottom);
 }
 
+/// Android 标准 Column 布局：顶/底栏占位（含 SafeArea，与 [CameraBottomBar] 一致）
+({double top, double bottom}) androidCameraChromeInsets({
+  required double safeTop,
+  required double safeBottom,
+}) {
+  return (
+    top: safeTop + AppSizes.topBarHeight,
+    bottom: safeBottom + AppSizes.cameraBottomBarContentHeight,
+  );
+}
+
 /// iOS 3:4 原生预览矩形（与 Android contain 定位一致，[verticalAlignY] 控制上移）
 Rect computeNativeSensorPreviewRect({
   required double screenWidth,

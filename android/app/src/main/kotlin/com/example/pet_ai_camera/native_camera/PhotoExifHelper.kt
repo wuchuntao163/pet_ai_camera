@@ -1,0 +1,43 @@
+package com.example.pet_ai_camera.native_camera
+
+import androidx.exifinterface.media.ExifInterface
+import java.io.File
+
+object PhotoExifHelper {
+    fun writeGps(file: File, latitude: Double, longitude: Double): Boolean {
+        if (!latitude.isFinite() || !longitude.isFinite()) return false
+        if (latitude == 0.0 && longitude == 0.0) return false
+        if (!file.exists()) return false
+
+        return try {
+            val exif = ExifInterface(file.absolutePath)
+            exif.setLatLong(latitude, longitude)
+            exif.saveAttributes()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun writeDeviceInfo(file: File, make: String?, model: String?): Boolean {
+        if (!file.exists()) return false
+        val makeValue = make?.trim().orEmpty()
+        val modelValue = model?.trim().orEmpty()
+        if (makeValue.isEmpty() && modelValue.isEmpty()) return false
+
+        return try {
+            val exif = ExifInterface(file.absolutePath)
+            if (makeValue.isNotEmpty()) {
+                exif.setAttribute(ExifInterface.TAG_MAKE, makeValue)
+            }
+            if (modelValue.isNotEmpty()) {
+                exif.setAttribute(ExifInterface.TAG_MODEL, modelValue)
+            }
+            exif.saveAttributes()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+}
+

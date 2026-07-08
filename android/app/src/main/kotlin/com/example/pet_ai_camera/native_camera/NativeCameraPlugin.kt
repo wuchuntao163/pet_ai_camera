@@ -7,6 +7,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class NativeCameraPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
     companion object {
@@ -106,6 +107,30 @@ class NativeCameraPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activ
                     r.onSuccess { result.success(it) }
                         .onFailure { result.error("CAPTURE_FAILED", it.message, null) }
                 }
+            }
+            "writeImageGps" -> {
+                val path = call.argument<String>("path")
+                val latitude = call.argument<Double>("latitude")
+                val longitude = call.argument<Double>("longitude")
+                if (path.isNullOrBlank() || latitude == null || longitude == null) {
+                    result.error("ARG", "path, latitude, longitude required", null)
+                    return
+                }
+                val ok = PhotoExifHelper.writeGps(File(path), latitude, longitude)
+                result.success(ok)
+            }
+            "writeImageDevice" -> {
+                val path = call.argument<String>("path")
+                if (path.isNullOrBlank()) {
+                    result.error("ARG", "path required", null)
+                    return
+                }
+                val ok = PhotoExifHelper.writeDeviceInfo(
+                    File(path),
+                    call.argument("make"),
+                    call.argument("model"),
+                )
+                result.success(ok)
             }
             else -> result.notImplemented()
         }

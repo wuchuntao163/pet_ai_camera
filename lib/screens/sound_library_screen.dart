@@ -156,7 +156,6 @@ class _SoundLibraryScreenState extends State<SoundLibraryScreen> {
   }
 
   Future<void> _toggleSidebarEffect(Map<String, dynamic> effect) async {
-    if (!CameraSoundStore.canToggleSidebar(effect)) return;
     final result = await _soundStore.toggleSidebarEffect(effect);
     if (!mounted) return;
     if (!result.ok && result.msg.isNotEmpty) {
@@ -182,7 +181,12 @@ class _SoundLibraryScreenState extends State<SoundLibraryScreen> {
       builder: (ctx) => RecordingDialog(
         onCancel: () => Navigator.of(ctx).pop(),
       ),
-    );
+    ).then((_) async {
+      if (!mounted) return;
+      await _soundStore.fetchCustomEffects(
+        languageId: AppCacheStore.instance.defaultLanguageId,
+      );
+    });
   }
 
   int _asInt(dynamic value) {
@@ -220,13 +224,6 @@ class _SoundLibraryScreenState extends State<SoundLibraryScreen> {
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
                 child: Row(
                   children: [
-                    Image.asset(
-                      'assets/images/camera/image_30.png',
-                      width: 16,
-                      height: 16,
-                      fit: BoxFit.contain,
-                    ),
-                    const SizedBox(width: 6),
                     const Text(
                       '宠物音效库',
                       style: TextStyle(
@@ -306,7 +303,6 @@ class _SoundLibraryScreenState extends State<SoundLibraryScreen> {
     final name = effect['name']?.toString() ?? '';
     final imageUrl = effect['image_url']?.toString();
     final effectId = _asInt(effect['id']);
-    final isRecommended = CameraSoundStore.isRecommended(effect);
     final isAdded = _soundStore.isUserAdded(effect);
     final playKey = SoundLibraryPreviewService.effectKey(effectId);
     return SoundCard(
@@ -314,13 +310,11 @@ class _SoundLibraryScreenState extends State<SoundLibraryScreen> {
       name: name,
       imageUrl: imageUrl,
       leadingAsset: leadingAsset,
-      isRecommended: isRecommended,
       isAdded: isAdded,
       isPlaying: _preview.isPlayingKey(playKey),
       isToggling: _soundStore.isEffectToggling(effectId),
       onPlayPause: () => _onEffectTap(effect, emoji: emoji),
-      onToggleAdd:
-          isRecommended ? null : () => _toggleSidebarEffect(effect),
+      onToggleAdd: _isPickerMode ? null : () => _toggleSidebarEffect(effect),
       onDelete: onDelete,
     );
   }

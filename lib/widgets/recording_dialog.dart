@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
-import '../constants/app_images.dart';
 import '../constants/app_sizes.dart';
 import '../data/camera_sound_store.dart';
 import '../services/sound_recording_service.dart';
@@ -26,9 +25,20 @@ class _RecordingDialogState extends State<RecordingDialog> {
   bool _isRecording = false;
   bool _hasRecorded = false;
   bool _isSaving = false;
+  bool _isPreviewPlaying = false;
   double _progress = 0;
   Timer? _progressTimer;
   DateTime? _recordingStartedAt;
+  StreamSubscription<bool>? _previewPlayingSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _previewPlayingSub = _recordingService.previewPlayingStream.listen((playing) {
+      if (!mounted) return;
+      setState(() => _isPreviewPlaying = playing);
+    });
+  }
 
   static const _inputBorder = OutlineInputBorder(
     borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -37,15 +47,11 @@ class _RecordingDialogState extends State<RecordingDialog> {
 
   bool get _hasName => _controller.text.trim().isNotEmpty;
 
-  bool get _isRedStyle => _isRecording;
-
-  Color get _startBtnBg =>
-      _isRedStyle ? AppColors.recordRed : AppColors.primary;
+  Color get _startBtnBg => AppColors.primary;
 
   Color get _startBtnText => AppColors.textOnDark;
 
-  Color get _secondaryBtnColor =>
-      _isRedStyle ? AppColors.recordRed : AppColors.primary;
+  Color get _secondaryBtnColor => AppColors.primary;
 
   String get _startBtnLabel {
     if (_isRecording) return '结束录制';
@@ -184,13 +190,14 @@ class _RecordingDialogState extends State<RecordingDialog> {
     widget.onCancel?.call();
   }
 
-  Future<void> _playPreview() async {
+  Future<void> _togglePreview() async {
     if (!_hasRecorded) return;
-    await _recordingService.playPreview();
+    await _recordingService.togglePreview();
   }
 
   @override
   void dispose() {
+    _previewPlayingSub?.cancel();
     _stopProgressTimer();
     _recordingService.dispose();
     _controller.dispose();
@@ -208,7 +215,7 @@ class _RecordingDialogState extends State<RecordingDialog> {
               minHeight: 6,
               backgroundColor: AppColors.inputBorder,
               valueColor:
-                  const AlwaysStoppedAnimation<Color>(AppColors.recordRed),
+                  const AlwaysStoppedAnimation<Color>(AppColors.primary),
             ),
           ),
           const SizedBox(height: 8),
@@ -224,24 +231,32 @@ class _RecordingDialogState extends State<RecordingDialog> {
     }
 
     if (_hasRecorded) {
-      return GestureDetector(
-        onTap: _playPreview,
-        behavior: HitTestBehavior.opaque,
+      return SizedBox(
+        width: double.infinity,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text(
-              '已录制的录音音频试听',
+              '音频试听',
               style: TextStyle(
                 fontSize: AppSizes.dialogHintFontSize,
                 color: AppColors.textGray,
               ),
             ),
-            const SizedBox(width: 6),
-            Icon(
-              Icons.play_circle_outline,
-              size: 20,
-              color: AppColors.primary,
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: _togglePreview,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  _isPreviewPlaying
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_filled,
+                  size: 26,
+                  color: AppColors.primary,
+                ),
+              ),
             ),
           ],
         ),
@@ -287,24 +302,14 @@ class _RecordingDialogState extends State<RecordingDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Image.asset(
-                      AppImages.micIcon,
-                      width: 14,
-                      height: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      '录制自定义音效',
-                      style: TextStyle(
-                        fontSize: AppSizes.dialogTitleSize,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.dialogTitle,
-                      ),
-                    ),
-                  ],
+                const Text(
+                  '录制自定义音效',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: AppSizes.dialogTitleSize,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.dialogTitle,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 SizedBox(
@@ -312,6 +317,7 @@ class _RecordingDialogState extends State<RecordingDialog> {
                   child: TextField(
                     controller: _controller,
                     enabled: !_isRecording && !_isSaving,
+                    maxLength: 5,
                     cursorColor: AppColors.textHint,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
@@ -319,7 +325,8 @@ class _RecordingDialogState extends State<RecordingDialog> {
                       color: AppColors.textPrimary,
                     ),
                     decoration: InputDecoration(
-                      hintText: '输入音效名称（如：叫咪咪）',
+                      hintText: '输入音效名称（最多5字）',
+                      counterText: '',
                       hintStyle: const TextStyle(
                         fontSize: AppSizes.dialogFontSize,
                         color: AppColors.textHint,
@@ -349,26 +356,15 @@ class _RecordingDialogState extends State<RecordingDialog> {
                             color: _startBtnBg,
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Image.asset(
-                                AppImages.micIcon,
-                                width: 14,
-                                height: 14,
+                          child: Center(
+                            child: Text(
+                              _startBtnLabel,
+                              style: TextStyle(
+                                fontSize: AppSizes.dialogFontSize,
+                                fontWeight: FontWeight.w600,
                                 color: _startBtnText,
-                                colorBlendMode: BlendMode.srcIn,
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _startBtnLabel,
-                                style: TextStyle(
-                                  fontSize: AppSizes.dialogFontSize,
-                                  fontWeight: FontWeight.w600,
-                                  color: _startBtnText,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),

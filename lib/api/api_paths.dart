@@ -52,9 +52,6 @@ class ApiPaths {
   /// 通用文件上传 · POST
   static const upload = '/api/base/upload';
 
-  /// 本地图片上传 · POST
-  static const uploadLocalImage = '/api/base/uploadLocalImage';
-
   /// 上传模拟图片 · POST
   static const uploadMimicImage = '/api/base/uploadMimicImage';
 

@@ -74,9 +74,15 @@ class AppSizes {
   static const double modeSegmentShiftUp = 8;
 
   /// 底部栏占位（模式切换 + 快门行 + 内边距），用于比例取景框上移
+  /// iOS 全屏叠层布局仍用此固定值；Android 请用 [cameraBottomBarContentHeight]
   static const double cameraBottomChrome = 172;
 
+  /// 底栏内容高度（与 [CameraBottomBar] 一致，不含 SafeArea）
+  static const double cameraBottomBarContentHeight =
+      8 + zoomSegmentItemHeight + 16 + shutterOuter + 48;
+
   /// 预览与取景框垂直位置（0=顶，0.5=居中；仅 9:16 全屏除外）
+  /// Android 标准布局在代码中改为底部对齐（1.0），此值主要给 iOS 遮罩比例用
   static const double previewVerticalAlignY = 0.35;
 
   /// iOS 3:4 在预览区内垂直位置（0=靠顶；Android 为 0.35，iOS 需更靠上）
@@ -151,8 +157,11 @@ class AppSizes {
   /// 卡片左侧封面图 / emoji 字号
   static const double soundCardEmoji = 36;
 
-  /// 卡片右侧操作图标字号（播放/暂停、加/勾、删除）
+  /// 卡片右侧操作图标字号（播放/暂停、加/勾）
   static const double soundCardActionIcon = 32;
+
+  /// 卡片右侧 PNG 操作图标（删除等，与圆形图标视觉对齐）
+  static const double soundCardAssetActionIcon = 22;
 
   /// 卡片右侧相邻操作图标间距（如播放与加/勾之间）
   static const double soundCardActionGap = 12;
@@ -166,6 +175,10 @@ class AppSizes {
   // --- 音效库空状态 ---
   /// 「还没有录制音效」空状态图标的宽高
   static const double soundEmptyStateIcon = 56;
+
+  // --- 相册 AppBar ---
+  /// 相册列表 / 大图预览等 AppBar 右侧 PNG 操作图标尺寸
+  static const double galleryAppBarActionIcon = 20;
 
   // --- 录制对话框（对齐 static/recording-dialog.html）---
   static const double dialogWidth = 300;
