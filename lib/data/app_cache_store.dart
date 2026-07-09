@@ -23,6 +23,8 @@ class AppCacheStore extends ChangeNotifier {
   bool configLoading = false;
   bool configLoaded = false;
 
+  String _localAppVersion = '1.0.0';
+
   dynamic get config => _config;
   dynamic get info => _info;
 
@@ -117,6 +119,50 @@ class AppCacheStore extends ChangeNotifier {
     }
     return null;
   }
+
+  /// getConfig → data.config 中的字符串字段
+  String? configString(String key) {
+    final config = _config;
+    if (config is! Map) return null;
+    final value = config[key]?.toString().trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  /// 推荐分享链接
+  String? get shareUrl => configString('share_url');
+
+  /// 联系客服（企业微信等）
+  String? get customerServiceLink => configString('day_customer_service_link');
+
+  /// 隐私政策链接（后台 privacy_url 优先，否则使用默认地址）
+  String get privacyPolicyUrl =>
+      configString('privacy_url') ??
+      configString('privacy_policy_url') ??
+      AppBranding.privacyPolicyUrl;
+
+  /// 本机安装版本（PackageInfo，启动时写入）
+  String get localAppVersion => _localAppVersion;
+
+  void setLocalVersion(String version) {
+    final trimmed = version.trim();
+    if (trimmed.isEmpty || trimmed == _localAppVersion) return;
+    _localAppVersion = trimmed;
+    notifyListeners();
+  }
+
+  /// 服务端最新版本（config.app_version）
+  String? get remoteAppVersion => configString('app_version');
+
+  /// 设置页展示的本机版本
+  String get appVersion => _localAppVersion;
+
+  /// 版本更新提示（HTML，来自 config.update_tips）
+  String? get updateTips => configString('update_tips');
+
+  String? get androidStoreUrl => configString('android_store_url');
+
+  String? get iosStoreUrl => configString('ios_store_url');
 
   void setNavList(dynamic data) {
     navList = data is List ? data : [];

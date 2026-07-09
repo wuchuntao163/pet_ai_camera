@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Privacy Policy - 萌宠相机</title>
+  <style>
+    :root {
+      --primary: #f97316;
+      --text: #111827;
+      --text-secondary: #374151;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --bg: #ffffff;
+      --bg-page: #f9fafb;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text-secondary);
+      background: var(--bg-page);
+      -webkit-font-smoothing: antialiased;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      background: var(--bg);
+      min-height: 100vh;
+      padding: 24px 20px 40px;
+    }
+
+    .brand {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--primary);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 26px;
+      line-height: 1.3;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .meta {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h2 {
+      font-size: 17px;
+      color: var(--text);
+      margin: 28px 0 12px;
+    }
+
+    p { margin-bottom: 12px; }
+
+    ul, ol {
+      margin: 0 0 14px 20px;
+    }
+
+    li { margin-bottom: 8px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin: 12px 0 16px;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f3f4f6;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .note {
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 14px;
+      margin: 16px 0;
+    }
+
+    .contact-box {
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 8px;
+    }
+
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    a:hover { text-decoration: underline; }
+
+    footer {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="brand">萌宠相机</p>
+    <h1>Privacy Policy</h1>
+    <p class="meta">
+      <strong>Effective date:</strong> July 9, 2026<br>
+      <strong>Last updated:</strong> July 9, 2026<br>
+      <strong>App name:</strong> 萌宠相机 (Pet AI Camera)
+    </p>
+
+    <p>
+      This Privacy Policy describes how <strong>萌宠相机</strong> (“we”, “us”, or “our”) collects,
+      uses, stores, and protects information when you use our mobile application on Android and iOS.
+      By using the App, you agree to the practices described in this policy.
+    </p>
+
+    <h2>1. Overview</h2>
+    <p>
+      萌宠相机 is a pet photo camera application. Core features include in-app photo capture,
+      local and cloud photo management, pet sound effects, AI-assisted pet copywriting, and a
+      photo palette that displays capture metadata (time, device, and location when available).
+    </p>
+    <p>
+      <strong>Important:</strong> The App supports <em>photo capture only</em>. We do not provide
+      in-app video recording. On some devices, the system camera permission dialog may mention
+      “record video” because of platform wording; that does not mean the App records video.
+    </p>
+
+    <h2>2. Information We Collect</h2>
+    <p>Depending on how you use the App, we may collect or process the following information:</p>
+    <ul>
+      <li><strong>Account and device identifiers:</strong> an anonymous device UUID generated on first launch, session token, and user ID returned by our login API.</li>
+      <li><strong>Photos you capture:</strong> image files, thumbnails, and related metadata (capture time, device model, and GPS coordinates when location is available).</li>
+      <li><strong>Custom audio (optional):</strong> short recordings you create in the Sound Library for custom pet sound effects.</li>
+      <li><strong>App settings:</strong> preferences such as sound volume, shutter sound, burst mode, and timer settings stored locally on your device.</li>
+      <li><strong>Technical and usage data:</strong> information needed to operate API requests (e.g., app version, request timestamps, encrypted API payloads).</li>
+    </ul>
+
+    <h2>3. Device Permissions and Purposes</h2>
+    <p>We request access only when needed for the features below:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Permission</th>
+          <th>Platform</th>
+          <th>Purpose</th>
+          <th>Required?</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Camera</td>
+          <td>Android / iOS</td>
+          <td>Capture pet photos using the in-app camera preview and shutter.</td>
+          <td>Yes, for taking photos</td>
+        </tr>
+        <tr>
+          <td>Photos / Media Library</td>
+          <td>Android / iOS</td>
+          <td>Save captures to your gallery, browse photos taken with the App, and sync local albums.</td>
+          <td>Yes, for gallery features</td>
+        </tr>
+        <tr>
+          <td>Location (When In Use)</td>
+          <td>Android / iOS</td>
+          <td>Obtain coarse or fine location to embed GPS data in photo EXIF and show capture location in the photo palette.</td>
+          <td>Optional</td>
+        </tr>
+        <tr>
+          <td>Media Location</td>
+          <td>Android</td>
+          <td>Read location metadata from photos in the gallery when EXIF or media location is available.</td>
+          <td>Optional</td>
+        </tr>
+        <tr>
+          <td>Microphone</td>
+          <td>Android / iOS</td>
+          <td>Record short custom pet sound effects in the Sound Library. Not used during normal photo capture.</td>
+          <td>Optional</td>
+        </tr>
+        <tr>
+          <td>Storage (legacy)</td>
+          <td>Android 12 and below</td>
+          <td>Read and write photos on older Android versions where scoped storage rules differ.</td>
+          <td>Conditional</td>
+        </tr>
+        <tr>
+          <td>Internet / Network</td>
+          <td>Android / iOS</td>
+          <td>Sign in, upload photos or audio, sync cloud records, fetch sound categories, and use AI text generation.</td>
+          <td>Yes, for online features</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      You may deny optional permissions (such as Location or Microphone) and still use photo capture.
+      Some features—location on the palette, custom sound recording, or cloud sync—may be limited
+      if related permissions or network access are unavailable.
+    </div>
+
+    <h2>4. How We Use Your Information</h2>
+    <p>We use collected information to:</p>
+    <ul>
+      <li>Provide camera capture, preview, editing, and gallery management.</li>
+      <li>Save photos locally and, when enabled, upload them to our servers for cloud backup and cross-device access.</li>
+      <li>Generate AI-assisted pet captions and palette presentation based on images you submit.</li>
+      <li>Store and play pet sound effects, including sounds you record or select.</li>
+      <li>Attach device and location metadata to photos for display in the palette export card.</li>
+      <li>Maintain your session, improve stability, and prevent abuse of our services.</li>
+      <li>Respond to support requests when you contact customer service.</li>
+    </ul>
+
+    <h2>5. Data Storage and Retention</h2>
+    <ul>
+      <li><strong>On your device:</strong> photos, settings, UUID, and session data may be stored in app storage and SharedPreferences (or equivalent).</li>
+      <li><strong>On our servers:</strong> uploaded photos, cloud gallery records, and related URLs may be retained while your account is active or as required to provide the service.</li>
+      <li><strong>Retention:</strong> we keep data only as long as necessary for the purposes above, unless a longer period is required by law or legitimate business needs (e.g., dispute resolution).</li>
+    </ul>
+    <p>
+      You may delete photos from the in-app gallery and request removal of associated cloud records
+      where the App provides delete functionality.
+    </p>
+
+    <h2>6. Sharing and Third Parties</h2>
+    <p>We do not sell your personal information. We may share data only in these cases:</p>
+    <ul>
+      <li><strong>Service infrastructure:</strong> our backend APIs and file hosting/CDN used to upload, store, and deliver images and audio.</li>
+      <li><strong>Platform services:</strong> geocoding or device information providers used to convert GPS coordinates into readable place names or to write device metadata.</li>
+      <li><strong>Sharing you initiate:</strong> when you use system share features to send images to other apps.</li>
+      <li><strong>Legal requirements:</strong> when required by applicable law, regulation, legal process, or governmental request.</li>
+    </ul>
+
+    <h2>7. Security</h2>
+    <p>
+      We use reasonable technical and organizational measures to protect your information,
+      including encrypted API communication where implemented by our backend. No method of
+      transmission or storage is 100% secure; we cannot guarantee absolute security.
+    </p>
+
+    <h2>8. Your Choices and Rights</h2>
+    <p>Depending on your jurisdiction, you may have the right to:</p>
+    <ul>
+      <li>Access, correct, or delete personal information we hold about you.</li>
+      <li>Withdraw consent for optional permissions via system settings at any time.</li>
+      <li>Disable cloud sync or stop using online features that require uploads.</li>
+      <li>Request information about how your data is processed.</li>
+    </ul>
+    <p>
+      To exercise these rights, use in-app controls where available or contact us using the
+      methods in Section 10.
+    </p>
+
+    <h2>9. International Users</h2>
+    <p>
+      Your information may be processed on servers located outside your country of residence.
+      By using the App, you consent to the transfer and processing of your information in
+      accordance with this policy and applicable law.
+    </p>
+
+    <h2>10. Contact Us</h2>
+    <p>
+      If you have questions about this Privacy Policy or wish to exercise your privacy rights,
+      please contact our customer support team.
+    </p>
+    <div class="contact-box">
+      <p><strong>Customer Support</strong></p>
+      <p>
+        In-app: <em>Settings → Contact Customer Service</em>
+      </p>
+      <p>
+        Email: <a href="mailto:uy_zc_wh@163.com">uy_zc_wh@163.com</a>
+      </p>
+      <p>
+        We aim to respond to privacy-related requests within a reasonable timeframe.
+      </p>
+    </div>
+
+    <h2>11. Changes to This Policy</h2>
+    <p>
+      We may update this Privacy Policy from time to time. When we do, we will revise the
+      “Last updated” date at the top of this page. Material changes may also be communicated
+      in the App. Continued use after an update means you accept the revised policy.
+    </p>
+
+    <footer>
+      <p>&copy; 2026 萌宠相机. All rights reserved.</p>
+    </footer>
+  </main>
+</body>
+</html>

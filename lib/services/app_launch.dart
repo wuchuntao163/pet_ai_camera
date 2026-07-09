@@ -6,6 +6,7 @@ import '../api/api.dart';
 import '../data/camera_record_store.dart';
 import '../data/app_cache_store.dart';
 import '../data/camera_sound_store.dart';
+import '../utils/app_update_util.dart';
 
 /// App 启动后执行（须在 runApp 之后）
 class AppLaunch extends ChangeNotifier {
@@ -24,6 +25,8 @@ class AppLaunch extends ChangeNotifier {
     await _cache.init();
 
     await Future.wait([_cache.fetchConfig(), _loginByUuid()]);
+
+    await AppUpdateUtil.init();
 
     await _fetchAppInfo();
     await _fetchNav();

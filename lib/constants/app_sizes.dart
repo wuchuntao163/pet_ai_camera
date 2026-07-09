@@ -108,7 +108,7 @@ class AppSizes {
   static const double sheetPaddingH = 20;
 
   /// 设置面板高度（相对屏幕）
-  static const double settingsSheetHeightFactor = 0.65;
+  static const double settingsSheetHeightFactor = 0.72;
   static const double closeBtn = 32;
   static const double closeIcon = 10;
 

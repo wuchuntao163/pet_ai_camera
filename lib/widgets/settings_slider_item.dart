@@ -23,7 +23,7 @@ class SettingsSliderItem extends StatelessWidget {
     return Container(
       height: 54,
       margin: const EdgeInsets.only(bottom: AppSizes.cardGap),
-      padding: const EdgeInsets.only(left: 17),
+      padding: const EdgeInsets.only(left: 17, right: 16),
       decoration: BoxDecoration(
         color: AppColors.cardBg,
         borderRadius: BorderRadius.circular(AppSizes.cardRadius),

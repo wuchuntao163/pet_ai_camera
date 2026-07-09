@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+
 import '../constants/app_colors.dart';
 import '../constants/app_sizes.dart';
+import '../data/app_cache_store.dart';
 import '../models/camera_config.dart';
 import '../services/camera_settings_store.dart';
+import '../utils/app_settings_util.dart';
+import '../utils/app_update_util.dart';
+import '../widgets/settings_link_item.dart';
+import '../widgets/settings_segment_control.dart';
 import '../widgets/settings_slider_item.dart';
 import '../widgets/settings_toggle_item.dart';
-import '../widgets/settings_segment_control.dart';
 
 /// 设置面板（底部弹窗）
 class SettingsScreen extends StatelessWidget {
@@ -20,14 +25,52 @@ class SettingsScreen extends StatelessWidget {
   static List<String> get _timerLabels =>
       TimerOption.all.map((o) => o.label).toList();
 
+  Future<void> _onShareRecommend(BuildContext context) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final origin = box != null
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+
+    try {
+      await AppSettingsUtil.shareRecommend(sharePositionOrigin: origin);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('分享失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _onOpenCustomerService(BuildContext context) async {
+    final ok = await AppSettingsUtil.openCustomerService();
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂时无法打开客服链接')),
+      );
+    }
+  }
+
+  Future<void> _onOpenPrivacyPolicy(BuildContext context) async {
+    final ok = await AppSettingsUtil.openPrivacyPolicy();
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂时无法打开隐私政策')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: settings,
+      listenable: Listenable.merge([settings, AppCacheStore.instance]),
       builder: (context, _) {
+        final cache = AppCacheStore.instance;
+
         return Container(
-          height:
-              MediaQuery.of(context).size.height * AppSizes.settingsSheetHeightFactor,
+          height: MediaQuery.of(context).size.height *
+              AppSizes.settingsSheetHeightFactor,
           decoration: const BoxDecoration(
             color: AppColors.settingsBg,
             borderRadius:
@@ -45,8 +88,9 @@ class SettingsScreen extends StatelessWidget {
               SizedBox(
                 height: AppSizes.sheetHeaderHeight,
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: AppSizes.sheetPaddingH),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSizes.sheetPaddingH,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -135,6 +179,28 @@ class SettingsScreen extends StatelessWidget {
                         options: _timerLabels,
                         selectedIndex: settings.timerIndex,
                         onChanged: settings.setTimerIndex,
+                      ),
+                      const SizedBox(height: 4),
+                      SettingsLinkItem(
+                        icon: Icons.favorite_border,
+                        title: '推荐给大家',
+                        onTap: () => _onShareRecommend(context),
+                      ),
+                      SettingsLinkItem(
+                        icon: Icons.headset_mic_outlined,
+                        title: '联系客服',
+                        onTap: () => _onOpenCustomerService(context),
+                      ),
+                      SettingsLinkItem(
+                        icon: Icons.privacy_tip_outlined,
+                        title: '隐私政策',
+                        onTap: () => _onOpenPrivacyPolicy(context),
+                      ),
+                      SettingsLinkItem(
+                        icon: Icons.info_outline,
+                        title: '版本号',
+                        trailing: cache.appVersion,
+                        onTap: () => AppUpdateUtil.checkUpdate(context),
                       ),
                     ],
                   ),

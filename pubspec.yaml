@@ -23,10 +23,12 @@ dependencies:
   photo_manager: 3.7.1
   record: ^6.2.1
   share_plus: ^10.1.4
+  url_launcher: ^6.3.2
   exif: ^3.3.0
   geocoding: ^3.0.0
   geolocator: ^13.0.2
   device_info_plus: ^11.3.3
+  package_info_plus: ^8.3.0
 
 dev_dependencies:
   flutter_test:
