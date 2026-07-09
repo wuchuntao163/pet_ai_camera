@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' show Rect;
 
 import 'package:flutter/services.dart';
 
