@@ -7,6 +7,8 @@ class AppPhoto {
   final int? recordId;
   final String? remoteUrl;
   final bool fromAlbumUpload;
+  final double? captureLatitude;
+  final double? captureLongitude;
 
   const AppPhoto({
     required this.id,
@@ -16,9 +18,20 @@ class AppPhoto {
     this.recordId,
     this.remoteUrl,
     this.fromAlbumUpload = false,
+    this.captureLatitude,
+    this.captureLongitude,
   });
 
   bool get hasLocalFile => localPath.isNotEmpty;
+
+  bool get hasCaptureCoordinates {
+    final lat = captureLatitude;
+    final lng = captureLongitude;
+    if (lat == null || lng == null) return false;
+    if (!lat.isFinite || !lng.isFinite) return false;
+    if (lat == 0 && lng == 0) return false;
+    return true;
+  }
 
   String? get displaySource {
     if (hasLocalFile) return localPath;
@@ -47,6 +60,8 @@ class AppPhoto {
       recordId: _readInt(json['recordId']),
       remoteUrl: json['remoteUrl'] as String?,
       fromAlbumUpload: json['fromAlbumUpload'] as bool? ?? false,
+      captureLatitude: _readDouble(json['captureLatitude']),
+      captureLongitude: _readDouble(json['captureLongitude']),
     );
   }
 
@@ -58,6 +73,8 @@ class AppPhoto {
         if (recordId != null) 'recordId': recordId,
         if (remoteUrl != null) 'remoteUrl': remoteUrl,
         if (fromAlbumUpload) 'fromAlbumUpload': fromAlbumUpload,
+        if (captureLatitude != null) 'captureLatitude': captureLatitude,
+        if (captureLongitude != null) 'captureLongitude': captureLongitude,
       };
 
   AppPhoto copyWith({
@@ -68,8 +85,11 @@ class AppPhoto {
     int? recordId,
     String? remoteUrl,
     bool? fromAlbumUpload,
+    double? captureLatitude,
+    double? captureLongitude,
     bool clearRecordId = false,
     bool clearRemoteUrl = false,
+    bool clearCaptureCoordinates = false,
   }) {
     return AppPhoto(
       id: id ?? this.id,
@@ -79,6 +99,12 @@ class AppPhoto {
       recordId: clearRecordId ? null : (recordId ?? this.recordId),
       remoteUrl: clearRemoteUrl ? null : (remoteUrl ?? this.remoteUrl),
       fromAlbumUpload: fromAlbumUpload ?? this.fromAlbumUpload,
+      captureLatitude: clearCaptureCoordinates
+          ? null
+          : (captureLatitude ?? this.captureLatitude),
+      captureLongitude: clearCaptureCoordinates
+          ? null
+          : (captureLongitude ?? this.captureLongitude),
     );
   }
 
@@ -86,6 +112,14 @@ class AppPhoto {
     if (value == null) return null;
     if (value is int) return value;
     if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  static double? _readDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value);
     return null;
   }
 }

@@ -1,11 +1,15 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:exif/exif.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../models/app_photo.dart';
+import '../utils/china_coordinate.dart';
 import 'device_info_service.dart';
+import 'photo_gallery_service.dart';
 
 /// 照片元数据（拍摄地点、时间、设备）
 class PhotoMetadata {
@@ -27,10 +31,27 @@ class PhotoMetadata {
 class PhotoMetadataService {
   PhotoMetadataService._();
 
-  static Future<PhotoMetadata> resolve(AppPhoto photo) async {
+  static const _exifHeaderMaxBytes = 512 * 1024;
+
+  static Future<PhotoMetadata> resolve(
+    AppPhoto photo, {
+    PhotoGalleryService? galleryService,
+  }) async {
     DateTime? capturedAt;
     String? location;
     String? device;
+
+    if (galleryService != null) {
+      final stored = await galleryService.captureCoordinatesFor(photo);
+      if (stored != null) {
+        location = await _locationFromCoordinates(stored.lat, stored.lng);
+      }
+    } else if (photo.hasCaptureCoordinates) {
+      location = await _locationFromCoordinates(
+        photo.captureLatitude,
+        photo.captureLongitude,
+      );
+    }
 
     AssetEntity? asset;
     if (photo.galleryAssetId != null && photo.galleryAssetId!.isNotEmpty) {
@@ -39,13 +60,18 @@ class PhotoMetadataService {
 
     if (asset != null) {
       capturedAt = asset.createDateTime;
-      await _ensureMediaLocationAccess();
-      location = await _locationFromAsset(asset);
+      if (location == null) {
+        await _ensureMediaLocationAccess();
+        location = await _locationFromAsset(asset);
+      }
     }
 
-    final exifPath = await _resolveExifPath(photo, asset);
+    final exifPath = await _resolveExifPath(photo, asset, galleryService);
     if (exifPath != null) {
-      final exif = await _readExif(exifPath);
+      final exif = await _readExif(
+        exifPath,
+        needGps: location == null,
+      );
       device = exif.device;
       capturedAt ??= exif.capturedAt;
       location ??= await _locationFromCoordinates(exif.lat, exif.lng);
@@ -62,7 +88,12 @@ class PhotoMetadataService {
   static Future<String?> _resolveExifPath(
     AppPhoto photo,
     AssetEntity? asset,
+    PhotoGalleryService? galleryService,
   ) async {
+    if (galleryService != null) {
+      final preferred = await galleryService.metadataExifPathFor(photo);
+      if (preferred != null) return preferred;
+    }
     if (photo.hasLocalFile) return photo.localPath;
     if (asset == null) return null;
     final origin = await asset.originFile;
@@ -111,19 +142,23 @@ class PhotoMetadataService {
 
   static Future<String?> _reverseGeocode(double lat, double lng) async {
     try {
-      final placemarks = await placemarkFromCoordinates(lat, lng);
+      final adjusted = ChinaCoordinate.forGeocoding(lat, lng);
+      final placemarks =
+          await placemarkFromCoordinates(adjusted.lat, adjusted.lng);
       if (placemarks.isEmpty) return null;
 
       final place = placemarks.first;
       final parts = <String>[
-        if (_hasText(place.administrativeArea)) place.administrativeArea!,
         if (_hasText(place.locality)) place.locality!,
+        if (_hasText(place.subAdministrativeArea)) place.subAdministrativeArea!,
         if (_hasText(place.subLocality)) place.subLocality!,
         if (_hasText(place.thoroughfare)) place.thoroughfare!,
       ];
       if (parts.isNotEmpty) {
         return parts.join('');
       }
+
+      if (_hasText(place.administrativeArea)) return place.administrativeArea;
 
       if (_hasText(place.street)) return place.street;
       if (_hasText(place.name)) return place.name;
@@ -153,12 +188,16 @@ class PhotoMetadataService {
     return '$latAbs°$latDir $lngAbs°$lngDir';
   }
 
-  static Future<_ExifFields> _readExif(String path) async {
+  static Future<_ExifFields> _readExif(
+    String path, {
+    required bool needGps,
+  }) async {
     try {
       final file = File(path);
       if (!await file.exists()) return const _ExifFields();
 
-      final data = await readExifFromBytes(await file.readAsBytes());
+      final bytes = await _readExifHeaderBytes(file);
+      final data = await readExifFromBytes(bytes);
       if (data.isEmpty) return const _ExifFields();
 
       final make = data['Image Make']?.printable.trim();
@@ -169,14 +208,20 @@ class PhotoMetadataService {
           data['Image DateTime']?.printable;
       final capturedAt = _parseExifDate(dateRaw);
 
-      final lat = _readGpsCoordinate(
-        data['GPS GPSLatitude']?.values,
-        data['GPS GPSLatitudeRef']?.printable,
-      );
-      final lng = _readGpsCoordinate(
-        data['GPS GPSLongitude']?.values,
-        data['GPS GPSLongitudeRef']?.printable,
-      );
+      double? lat;
+      double? lng;
+      if (needGps) {
+        lat = _readGpsCoordinate(
+          data['GPS GPSLatitude']?.values,
+          data['GPS GPSLatitudeRef']?.printable,
+          data['GPS GPSLatitude']?.printable,
+        );
+        lng = _readGpsCoordinate(
+          data['GPS GPSLongitude']?.values,
+          data['GPS GPSLongitudeRef']?.printable,
+          data['GPS GPSLongitude']?.printable,
+        );
+      }
 
       return _ExifFields(
         capturedAt: capturedAt,
@@ -186,6 +231,17 @@ class PhotoMetadataService {
       );
     } catch (_) {
       return const _ExifFields();
+    }
+  }
+
+  static Future<Uint8List> _readExifHeaderBytes(File file) async {
+    final raf = await file.open();
+    try {
+      final total = await raf.length();
+      final length = math.min(total, _exifHeaderMaxBytes);
+      return await raf.read(length);
+    } finally {
+      await raf.close();
     }
   }
 
@@ -219,20 +275,56 @@ class PhotoMetadataService {
   static double? _readGpsCoordinate(
     IfdValues? values,
     String? ref,
+    String? printable,
   ) {
-    if (values is! IfdRatios || values.ratios.length < 3) return null;
+    final fromValues = _gpsValuesToFloat(values);
+    if (fromValues != null) {
+      return _applyGpsRef(fromValues, ref);
+    }
+    return _parseGpsPrintable(printable, ref);
+  }
+
+  static double? _gpsValuesToFloat(IfdValues? values) {
+    if (values is! IfdRatios || values.ratios.isEmpty) return null;
     try {
-      final ratios = values.ratios;
-      final degrees = ratios[0].toDouble();
-      final minutes = ratios[1].toDouble();
-      final seconds = ratios[2].toDouble();
-      var result = degrees + minutes / 60 + seconds / 3600;
-      if (ref == 'S' || ref == 'W') result = -result;
+      var result = 0.0;
+      var unit = 1.0;
+      for (final ratio in values.ratios) {
+        result += ratio.toDouble() * unit;
+        unit /= 60.0;
+      }
       if (!result.isFinite) return null;
       return result;
     } catch (_) {
       return null;
     }
+  }
+
+  static double? _applyGpsRef(double value, String? ref) {
+    var result = value;
+    if (ref == 'S' || ref == 'W') result = -result;
+    if (!result.isFinite) return null;
+    return result;
+  }
+
+  static double? _parseGpsPrintable(String? printable, String? ref) {
+    if (printable == null || printable.isEmpty) return null;
+    final matches = RegExp(r'(-?\d+(?:\.\d+)?)').allMatches(printable);
+    final numbers = matches
+        .map((match) => double.tryParse(match.group(1)!))
+        .whereType<double>()
+        .toList();
+    if (numbers.isEmpty) return null;
+
+    double result;
+    if (numbers.length >= 3) {
+      result = numbers[0] + numbers[1] / 60 + numbers[2] / 3600;
+    } else if (numbers.length == 2) {
+      result = numbers[0] + numbers[1] / 60;
+    } else {
+      result = numbers[0];
+    }
+    return _applyGpsRef(result, ref);
   }
 }
 

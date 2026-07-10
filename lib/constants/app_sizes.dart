@@ -74,7 +74,7 @@ class AppSizes {
   static const double modeSegmentShiftUp = 8;
 
   /// 底部栏占位（模式切换 + 快门行 + 内边距），用于比例取景框上移
-  /// iOS 全屏叠层布局仍用此固定值；Android 请用 [cameraBottomBarContentHeight]
+  /// iOS 全屏叠层布局仍用此固定值作粗略参考；遮罩请用 [iosPreviewChromeInsets]
   static const double cameraBottomChrome = 172;
 
   /// 底栏内容高度（与 [CameraBottomBar] 一致，不含 SafeArea）
@@ -88,14 +88,14 @@ class AppSizes {
   /// iOS 3:4 在预览区内垂直位置（0=靠顶；Android 为 0.35，iOS 需更靠上）
   static const double ios34PreviewAlignY = 0.0;
 
-  /// 1X/2X/5X 距预览区底部的距离
+  /// 1X/2X/5X 距预览区底部的距离（Android 预览区在底栏上方）
   static const double zoomBarBottom = 10;
 
-  /// iOS：1X/2X/5X 距预览区底部（略低于 Android）
-  static const double iosZoomBarBottom = 0;
+  /// iOS 全屏叠层：变焦条距叠层区底部（正值=上移，远离底部黑边）
+  static const double iosZoomBarBottom = 12;
 
-  /// iOS：照片切换条下移（正值=靠下）
-  static const double iosModeSegmentShiftDown = 8;
+  /// iOS：照片切换条上移（与 Android [modeSegmentShiftUp] 分开调）
+  static const double iosModeSegmentShiftUp = 6;
 
   /// 快门闪白：亮度与停留时间
   static const double captureFlashOpacity = 0.22;

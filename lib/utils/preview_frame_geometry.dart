@@ -2,7 +2,7 @@ import 'dart:ui' show Rect;
 
 import '../constants/app_sizes.dart';
 
-/// 顶/底栏之间的预览区 insets（与 Android 标准布局一致）
+/// 顶/底栏之间的预览区 insets（历史固定高度，iOS 请用 [iosPreviewChromeInsets]）
 ({double top, double bottom}) previewAreaInsets({
   required double screenHeight,
   required double safeTop,
@@ -14,6 +14,17 @@ import '../constants/app_sizes.dart';
       .clamp(1.0, screenHeight);
   final bottom = screenHeight - top - areaH;
   return (top: top, bottom: bottom);
+}
+
+/// iOS 全屏叠层：与 Column + SafeArea + [CameraBottomBar] 实际占位一致（适配各机型）
+({double top, double bottom}) iosPreviewChromeInsets({
+  required double safeTop,
+  required double safeBottom,
+}) {
+  return (
+    top: safeTop + AppSizes.topBarHeight,
+    bottom: safeBottom + AppSizes.cameraBottomBarContentHeight,
+  );
 }
 
 /// Android 标准 Column 布局：顶/底栏占位（含 SafeArea，与 [CameraBottomBar] 一致）
@@ -32,12 +43,13 @@ Rect computeNativeSensorPreviewRect({
   required double screenWidth,
   required double screenHeight,
   required double safeTop,
+  required double safeBottom,
   required double previewAspect,
   double verticalAlignY = AppSizes.ios34PreviewAlignY,
 }) {
-  final insets = previewAreaInsets(
-    screenHeight: screenHeight,
+  final insets = iosPreviewChromeInsets(
     safeTop: safeTop,
+    safeBottom: safeBottom,
   );
   final areaH = screenHeight - insets.top - insets.bottom;
   final layout = computePreviewScreenLayout(

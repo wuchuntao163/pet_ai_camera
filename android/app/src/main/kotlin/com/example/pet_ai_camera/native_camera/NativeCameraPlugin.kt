@@ -132,6 +132,22 @@ class NativeCameraPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activ
                 )
                 result.success(ok)
             }
+            "writeCaptureMetadata" -> {
+                val path = call.argument<String>("path")
+                if (path.isNullOrBlank()) {
+                    result.error("ARG", "path required", null)
+                    return
+                }
+                val ok = PhotoExifHelper.writeCaptureMetadata(
+                    File(path),
+                    call.argument("latitude"),
+                    call.argument("longitude"),
+                    call.argument("make"),
+                    call.argument("model"),
+                    call.argument("dateTimeOriginal"),
+                )
+                result.success(ok)
+            }
             else -> result.notImplemented()
         }
     }

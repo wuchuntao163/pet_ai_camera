@@ -62,7 +62,8 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
       _resolvedImageUrl = null;
     });
 
-    final metadataFuture = PhotoMetadataService.resolve(_photo);
+    final metadataFuture =
+        PhotoMetadataService.resolve(_photo, galleryService: widget.galleryService);
     var bandColor = Colors.white;
     String? resolvedUrl;
 

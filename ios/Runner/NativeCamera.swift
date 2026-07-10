@@ -383,9 +383,6 @@ extension NativeCameraController: AVCapturePhotoCaptureDelegate {
             "captureDurationMs": elapsedMs,
             "directOutput": directOutput,
           ]
-          if let thumbData = PhotoCropHelper.makeThumbnailJPEG(url: photoURL) {
-            result["thumbnailBytes"] = FlutterStandardTypedData(bytes: thumbData)
-          }
           DispatchQueue.main.async {
             completionHandler?(.success(result))
           }
@@ -575,6 +572,21 @@ final class NativeCameraPlugin: NSObject, FlutterPlugin {
         to: URL(fileURLWithPath: path),
         make: args["make"] as? String,
         model: args["model"] as? String
+      )
+      result(ok)
+    case "writeCaptureMetadata":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "ARG", message: "path required", details: nil))
+        return
+      }
+      let ok = PhotoExifHelper.writeCaptureMetadata(
+        to: URL(fileURLWithPath: path),
+        latitude: args["latitude"] as? Double,
+        longitude: args["longitude"] as? Double,
+        make: args["make"] as? String,
+        model: args["model"] as? String,
+        dateTimeOriginal: args["dateTimeOriginal"] as? String
       )
       result(ok)
     default:

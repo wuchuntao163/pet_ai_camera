@@ -391,36 +391,58 @@ enum PhotoCropHelper {
 }
 
 enum PhotoExifHelper {
-  static func writeGps(to url: URL, latitude: Double, longitude: Double) -> Bool {
-    guard latitude.isFinite, longitude.isFinite else { return false }
-    guard !(latitude == 0 && longitude == 0) else { return false }
+  private static func gpsCoordinateArray(from decimal: Double) -> [[Int]] {
+    let value = abs(decimal)
+    let degrees = Int(value)
+    let minutesDecimal = (value - Double(degrees)) * 60.0
+    let minutes = Int(minutesDecimal)
+    let seconds = (minutesDecimal - Double(minutes)) * 60.0
+    let secondsNumerator = Int((seconds * 1000).rounded())
+    return [
+      [degrees, 1],
+      [minutes, 1],
+      [secondsNumerator, 1000],
+    ]
+  }
+
+  private static func gpsDictionary(
+    latitude: Double,
+    longitude: Double
+  ) -> [String: Any] {
+    let latRef = latitude >= 0 ? "N" : "S"
+    let lngRef = longitude >= 0 ? "E" : "W"
+    return [
+      kCGImagePropertyGPSLatitude as String: gpsCoordinateArray(from: latitude),
+      kCGImagePropertyGPSLatitudeRef as String: latRef,
+      kCGImagePropertyGPSLongitude as String: gpsCoordinateArray(from: longitude),
+      kCGImagePropertyGPSLongitudeRef as String: lngRef,
+    ]
+  }
+
+  /// 只改 EXIF 元数据，不解码整图像素，避免拍照后内存峰值
+  private static func writeMetadata(
+    to url: URL,
+    tempSuffix: String,
+    update: (inout [String: Any]) -> Void
+  ) -> Bool {
     guard FileManager.default.fileExists(atPath: url.path) else { return false }
 
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-          let imageType = CGImageSourceGetType(source),
-          let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+          let imageType = CGImageSourceGetType(source) else {
       return false
     }
 
     var properties =
       (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
+    update(&properties)
 
-    let latRef = latitude >= 0 ? "N" : "S"
-    let lngRef = longitude >= 0 ? "E" : "W"
-    properties[kCGImagePropertyGPSDictionary as String] = [
-      kCGImagePropertyGPSLatitude as String: abs(latitude),
-      kCGImagePropertyGPSLatitudeRef as String: latRef,
-      kCGImagePropertyGPSLongitude as String: abs(longitude),
-      kCGImagePropertyGPSLongitudeRef as String: lngRef,
-    ]
-
-    let tempUrl = url.deletingPathExtension().appendingPathExtension("gps.tmp.jpg")
+    let tempUrl = url.deletingPathExtension().appendingPathExtension("\(tempSuffix).tmp.jpg")
     defer { try? FileManager.default.removeItem(at: tempUrl) }
 
     guard let dest = CGImageDestinationCreateWithURL(tempUrl as CFURL, imageType, 1, nil) else {
       return false
     }
-    CGImageDestinationAddImage(dest, cgImage, properties as CFDictionary)
+    CGImageDestinationAddImageFromSource(dest, source, 0, properties as CFDictionary)
     guard CGImageDestinationFinalize(dest) else { return false }
 
     do {
@@ -431,45 +453,85 @@ enum PhotoExifHelper {
     }
   }
 
+  static func writeGps(to url: URL, latitude: Double, longitude: Double) -> Bool {
+    guard latitude.isFinite, longitude.isFinite else { return false }
+    guard !(latitude == 0 && longitude == 0) else { return false }
+
+    return writeMetadata(to: url, tempSuffix: "gps") { properties in
+      properties[kCGImagePropertyGPSDictionary as String] = gpsDictionary(
+        latitude: latitude,
+        longitude: longitude
+      )
+    }
+  }
+
   static func writeDeviceInfo(to url: URL, make: String?, model: String?) -> Bool {
     let makeValue = make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let modelValue = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if makeValue.isEmpty && modelValue.isEmpty { return false }
-    guard FileManager.default.fileExists(atPath: url.path) else { return false }
 
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-          let imageType = CGImageSourceGetType(source),
-          let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+    return writeMetadata(to: url, tempSuffix: "device") { properties in
+      var tiff =
+        (properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
+      if !makeValue.isEmpty {
+        tiff[kCGImagePropertyTIFFMake as String] = makeValue
+      }
+      if !modelValue.isEmpty {
+        tiff[kCGImagePropertyTIFFModel as String] = modelValue
+      }
+      properties[kCGImagePropertyTIFFDictionary as String] = tiff
+    }
+  }
+
+  /// GPS + 设备信息一次写入，避免同一张图重复落盘
+  static func writeCaptureMetadata(
+    to url: URL,
+    latitude: Double?,
+    longitude: Double?,
+    make: String?,
+    model: String?,
+    dateTimeOriginal: String?
+  ) -> Bool {
+    let makeValue = make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let modelValue = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let dateValue = dateTimeOriginal?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let hasGps = latitude.map { $0.isFinite } == true
+      && longitude.map { $0.isFinite } == true
+      && !(latitude == 0 && longitude == 0)
+    if !hasGps && makeValue.isEmpty && modelValue.isEmpty && dateValue.isEmpty {
       return false
     }
 
-    var properties =
-      (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
+    return writeMetadata(to: url, tempSuffix: "meta") { properties in
+      if let latitude, let longitude, hasGps {
+        properties[kCGImagePropertyGPSDictionary as String] = gpsDictionary(
+          latitude: latitude,
+          longitude: longitude
+        )
+      }
 
-    var tiff =
-      (properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
-    if !makeValue.isEmpty {
-      tiff[kCGImagePropertyTIFFMake as String] = makeValue
-    }
-    if !modelValue.isEmpty {
-      tiff[kCGImagePropertyTIFFModel as String] = modelValue
-    }
-    properties[kCGImagePropertyTIFFDictionary as String] = tiff
+      var tiff =
+        (properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
+      if !makeValue.isEmpty {
+        tiff[kCGImagePropertyTIFFMake as String] = makeValue
+      }
+      if !modelValue.isEmpty {
+        tiff[kCGImagePropertyTIFFModel as String] = modelValue
+      }
+      if !dateValue.isEmpty {
+        tiff[kCGImagePropertyTIFFDateTime as String] = dateValue
+      }
+      if !tiff.isEmpty {
+        properties[kCGImagePropertyTIFFDictionary as String] = tiff
+      }
 
-    let tempUrl = url.deletingPathExtension().appendingPathExtension("device.tmp.jpg")
-    defer { try? FileManager.default.removeItem(at: tempUrl) }
-
-    guard let dest = CGImageDestinationCreateWithURL(tempUrl as CFURL, imageType, 1, nil) else {
-      return false
-    }
-    CGImageDestinationAddImage(dest, cgImage, properties as CFDictionary)
-    guard CGImageDestinationFinalize(dest) else { return false }
-
-    do {
-      _ = try FileManager.default.replaceItemAt(url, withItemAt: tempUrl)
-      return true
-    } catch {
-      return false
+      if !dateValue.isEmpty {
+        var exif =
+          (properties[kCGImagePropertyExifDictionary as String] as? [String: Any]) ?? [:]
+        exif[kCGImagePropertyExifDateTimeOriginal as String] = dateValue
+        exif[kCGImagePropertyExifDateTimeDigitized as String] = dateValue
+        properties[kCGImagePropertyExifDictionary as String] = exif
+      }
     }
   }
 }

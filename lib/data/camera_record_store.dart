@@ -60,9 +60,7 @@ class CameraRecordStore extends ChangeNotifier {
       final res = await Api.post(ApiPaths.saveCameraRecord, data: data);
       final recordId = _asInt(res.data is Map ? res.data['record_id'] : null);
       if (kDebugMode) {
-        debugPrint(
-          '[CameraRecordStore] saveRecord ok recordId=$recordId fileUrl=$fileUrl',
-        );
+        debugPrint('[CameraRecordStore] 保存成功 recordId=$recordId');
       }
       return (
         ok: true,
@@ -71,7 +69,7 @@ class CameraRecordStore extends ChangeNotifier {
         fileUrl: fileUrl,
       );
     } on ApiException catch (e) {
-      if (kDebugMode) {
+      if (kDebugMode && e.message.isNotEmpty) {
         debugPrint('[CameraRecordStore] saveRecord failed: $e');
       }
       return (ok: false, msg: e.message, recordId: null, fileUrl: null);

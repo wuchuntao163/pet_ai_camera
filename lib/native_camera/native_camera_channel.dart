@@ -213,4 +213,33 @@ class NativeCameraChannel {
     }
   }
 
+  /// GPS + 设备信息一次写入（iOS 避免同图多次解码）
+  static Future<bool> writeCaptureMetadata({
+    required String path,
+    double? latitude,
+    double? longitude,
+    String? make,
+    String? model,
+    String? dateTimeOriginal,
+  }) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>(
+        'writeCaptureMetadata',
+        {
+          'path': path,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
+          if (make != null && make.isNotEmpty) 'make': make,
+          if (model != null && model.isNotEmpty) 'model': model,
+          if (dateTimeOriginal != null && dateTimeOriginal.isNotEmpty)
+            'dateTimeOriginal': dateTimeOriginal,
+        },
+      );
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
 }

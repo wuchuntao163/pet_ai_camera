@@ -230,7 +230,9 @@ class _Http {
           contentType: data is FormData ? null : Headers.jsonContentType,
         ),
       );
-      if (res.data == null) throw ApiException.network('响应为空');
+      if (res.data == null) {
+        throw ApiException.network('', rawData: null);
+      }
       return _parseBody<T>(
         _parseJson(res.data),
         path: path,
@@ -246,10 +248,7 @@ class _Http {
         '  raw: ${_truncateForLog(e.response?.data)}',
         path: e.requestOptions.path,
       );
-      throw ApiException.network(
-        e.error?.toString() ?? e.message ?? '网络请求失败',
-        rawData: e.response?.data,
-      );
+      throw _networkExceptionFrom(e);
     }
   }
 
@@ -269,19 +268,16 @@ class _Http {
         'data': _envelopeDataForLog(payload),
       })}',
       path: path,
+      quietOnSuccess: true,
     );
 
     if (code == 8001) {
       _logApi('[API] business error $path: code=$code msg=$msg', path: path);
-      throw ApiException.business(code, msg.isNotEmpty ? msg : '签名错误', payload);
+      throw ApiException.business(code, msg, payload);
     }
     if (code != 200 && code != 4000) {
       _logApi('[API] business error $path: code=$code msg=$msg', path: path);
-      throw ApiException.business(
-        code,
-        msg.isNotEmpty ? msg : '请求失败($code)',
-        payload,
-      );
+      throw ApiException.business(code, msg, payload);
     }
 
     // 加密响应 data.k + data.r → AES 解密（对齐 uniapp decryptAjax）
@@ -293,6 +289,7 @@ class _Http {
       _logApi(
         '[API] decrypted $path:\n${_prettyJson(decrypted)}',
         path: path,
+        quietOnSuccess: true,
       );
       final parsed =
           parser != null && decrypted != null ? parser(decrypted) : decrypted as T?;
@@ -306,6 +303,7 @@ class _Http {
           'fromEncrypted': true,
         })}',
         path: path,
+        quietOnSuccess: true,
       );
       return result;
     }
@@ -318,6 +316,7 @@ class _Http {
         'data': result.data,
       })}',
       path: path,
+      quietOnSuccess: true,
     );
     return result;
   }
@@ -327,15 +326,15 @@ class _Http {
     if (data is Map) return Map<String, dynamic>.from(data);
     if (data is String) {
       final t = data.trim();
-      if (t.isEmpty) throw ApiException.network('响应为空');
+      if (t.isEmpty) throw ApiException.network('', rawData: data);
       try {
         final decoded = jsonDecode(t);
         if (decoded is Map) return Map<String, dynamic>.from(decoded);
       } catch (_) {
-        throw ApiException.network('响应不是 JSON', rawData: data);
+        throw ApiException.network('', rawData: data);
       }
     }
-    throw ApiException.network('无法解析响应: ${data.runtimeType}', rawData: data);
+    throw ApiException.network('', rawData: data);
   }
 }
 
@@ -391,7 +390,8 @@ class _LogInterceptor extends Interceptor {
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     if (kDebugMode &&
         ApiConfig.enableLog &&
-        _shouldLogApiPath(options.path)) {
+        _shouldLogApiPath(options.path) &&
+        !_isQuietSaveApiPath(options.path)) {
       // ignore: avoid_print
       print('[API] --> ${options.method} ${options.uri}');
       if (options.data != null) {
@@ -406,7 +406,8 @@ class _LogInterceptor extends Interceptor {
   void onResponse(Response response, ResponseInterceptorHandler handler) {
     if (kDebugMode &&
         ApiConfig.enableLog &&
-        _shouldLogApiPath(response.requestOptions.path)) {
+        _shouldLogApiPath(response.requestOptions.path) &&
+        !_isQuietSaveApiPath(response.requestOptions.path)) {
       final path = response.requestOptions.path;
       // ignore: avoid_print
       print('[API] <-- ${response.statusCode} $path');
@@ -433,36 +434,38 @@ class _ErrorInterceptor extends Interceptor {
 
     if (raw != null) {
       try {
-        final map = _Http.instance._parseJson(raw);
-        final code = _asInt(map['code']);
-        final msg = map['msg']?.toString() ?? '请求失败!!!';
-        final payload = map['data'];
-        dynamic decrypted = payload;
-        if (payload is Map && payload['k'] != null && payload['r'] != null) {
-          decrypted = _Crypto.decryptAjax(
-            payload['k'].toString(),
-            payload['r'].toString(),
-          );
-          if (!suppressLog) {
-            _logApi('[API] HTTP error decrypted $path:\n${_prettyJson(decrypted)}', path: path);
+        final map = _tryParseErrorBody(raw);
+        if (map != null) {
+          final code = _asInt(map['code']);
+          final msg = map['msg']?.toString().trim() ?? '';
+          final payload = map['data'];
+          dynamic decrypted = payload;
+          if (payload is Map && payload['k'] != null && payload['r'] != null) {
+            decrypted = _Crypto.decryptAjax(
+              payload['k'].toString(),
+              payload['r'].toString(),
+            );
+            if (!suppressLog) {
+              _logApi('[API] HTTP error decrypted $path:\n${_prettyJson(decrypted)}', path: path);
+            }
+          } else if (!suppressLog) {
+            _logApi(
+              '[API] HTTP error envelope $path:\n${_prettyJson({
+                'code': code,
+                'msg': msg,
+                'data': payload,
+              })}',
+              path: path,
+            );
           }
-        } else if (!suppressLog) {
-          _logApi(
-            '[API] HTTP error envelope $path:\n${_prettyJson({
-              'code': code,
-              'msg': msg,
-              'data': payload,
-            })}',
-            path: path,
-          );
+          handler.reject(DioException(
+            requestOptions: err.requestOptions,
+            response: err.response,
+            type: err.type,
+            error: ApiException.business(code, msg, decrypted ?? payload),
+          ));
+          return;
         }
-        handler.reject(DioException(
-          requestOptions: err.requestOptions,
-          response: err.response,
-          type: err.type,
-          error: ApiException.business(code, msg, decrypted ?? payload),
-        ));
-        return;
       } catch (parseErr) {
         if (!suppressLog) {
           _logApi('[API] HTTP error parse failed $path: $parseErr', path: path);
@@ -473,7 +476,7 @@ class _ErrorInterceptor extends Interceptor {
       requestOptions: err.requestOptions,
       response: err.response,
       type: err.type,
-      error: ApiException.network(err.message ?? '网络请求失败!!!', rawData: raw),
+      error: _networkExceptionFrom(err),
     ));
   }
 }
@@ -527,8 +530,50 @@ int _asInt(dynamic v) {
   return 0;
 }
 
-void _logApi(String message, {required String path}) {
+/// 从 HTTP 响应体解析后端 [msg]；无则返回空字符串（不使用前端兜底文案）
+Map<String, dynamic>? _tryParseErrorBody(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  if (raw is String) {
+    final t = raw.trim();
+    if (t.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(t);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+  }
+  return null;
+}
+
+String _backendMsgFromRaw(dynamic raw) {
+  final map = _tryParseErrorBody(raw);
+  if (map == null) return '';
+  return map['msg']?.toString().trim() ?? '';
+}
+
+int? _backendCodeFromRaw(dynamic raw) {
+  final map = _tryParseErrorBody(raw);
+  if (map == null) return null;
+  final code = _asInt(map['code']);
+  return code == 0 ? null : code;
+}
+
+ApiException _networkExceptionFrom(DioException e) {
+  final raw = e.response?.data;
+  final msg = _backendMsgFromRaw(raw);
+  if (msg.isNotEmpty) {
+    return ApiException.business(
+      _backendCodeFromRaw(raw) ?? 0,
+      msg,
+      raw,
+    );
+  }
+  return ApiException.network('', rawData: raw);
+}
+
+void _logApi(String message, {required String path, bool quietOnSuccess = false}) {
   if (!_shouldLogApiPath(path)) return;
+  if (quietOnSuccess && _isQuietSaveApiPath(path)) return;
   if (kDebugMode && ApiConfig.enableLog) {
     // ignore: avoid_print
     print(message);
@@ -540,9 +585,17 @@ bool _shouldLogApiPath(String path) {
     ApiPaths.saveCameraRecord,
     ApiPaths.addCustomSoundEffect,
     ApiPaths.upload,
+    ApiPaths.uploadLocalImage,
     ApiPaths.generatePetText,
   ];
   return allowed.any(path.contains);
+}
+
+/// 拍照保存链路成功时静默，由 [CameraRecordStore] 统一打一条日志
+bool _isQuietSaveApiPath(String path) {
+  return path.contains(ApiPaths.upload) ||
+      path.contains(ApiPaths.uploadLocalImage) ||
+      path.contains(ApiPaths.saveCameraRecord);
 }
 
 String _prettyJson(dynamic data) {

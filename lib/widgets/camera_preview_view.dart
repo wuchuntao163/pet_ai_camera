@@ -13,6 +13,10 @@ class CameraPreviewView extends StatelessWidget {
   /// iOS 遮罩模式：非 null 时用黑条标出取景框（1:1 / 4:3 / 16:9）
   final double? maskRatio;
 
+  /// iOS 全屏叠层：顶/底栏占位，与 [iosPreviewChromeInsets] 一致
+  final double topInset;
+  final double bottomInset;
+
   /// Android 定位模式：传感器流宽高比（宽/高）
   final double? previewAspectRatio;
 
@@ -31,6 +35,8 @@ class CameraPreviewView extends StatelessWidget {
   const CameraPreviewView({
     super.key,
     this.maskRatio,
+    this.topInset = 0,
+    this.bottomInset = 0,
     this.previewAspectRatio,
     this.fitContain = false,
     this.fullScreen = false,
@@ -61,6 +67,8 @@ class CameraPreviewView extends StatelessWidget {
             _PreviewMaskOverlay(
               ratio: maskRatio!,
               frameAlignY: verticalAlignY,
+              topInset: topInset,
+              bottomInset: bottomInset,
             ),
         ],
       ),
@@ -112,10 +120,14 @@ class CameraPreviewView extends StatelessWidget {
 class _PreviewMaskOverlay extends StatelessWidget {
   final double ratio;
   final double frameAlignY;
+  final double topInset;
+  final double bottomInset;
 
   const _PreviewMaskOverlay({
     required this.ratio,
     required this.frameAlignY,
+    this.topInset = 0,
+    this.bottomInset = 0,
   });
 
   @override
@@ -126,6 +138,8 @@ class _PreviewMaskOverlay extends StatelessWidget {
           screenWidth: constraints.maxWidth,
           screenHeight: constraints.maxHeight,
           ratio: ratio,
+          topInset: topInset,
+          bottomInset: bottomInset,
           frameAlignY: frameAlignY,
         );
 

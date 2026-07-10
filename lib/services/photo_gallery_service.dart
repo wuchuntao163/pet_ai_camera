@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 
+import 'capture_location_service.dart';
 import '../data/camera_record_store.dart';
 import '../models/app_photo.dart';
 import '../native_gallery/gallery_media_channel.dart';
@@ -32,6 +33,9 @@ class PhotoGalleryService {
   Directory? _cloudCacheDir;
   ({String id, String path})? _readyCaptureSlot;
   Future<void> _uploadTail = Future.value();
+  Future<void> _gallerySyncTail = Future.value();
+  Future<void> _captureRegisterTail = Future.value();
+  int _pendingCaptureSaveCount = 0;
 
   List<AppPhoto> get photos => List.unmodifiable(_photos);
 
@@ -47,12 +51,74 @@ class PhotoGalleryService {
   Future<void> init() async {
     if (_loaded) return;
     await _loadIndex();
+    await _loadCloudGalleryIndex();
     await _loadGalleryAssetMap();
     _rebuildGalleryAssetMapFromPhotos();
     await _photosDirectory();
     await _cloudCacheDirectory();
     _loaded = true;
     unawaited(warmCaptureSlot());
+  }
+
+  /// 相机左下角缩略图：优先本地/缓存，其次云端 URL
+  Future<AppPhoto?> latestDisplayPhoto() async {
+    await init();
+
+    for (final photo in _cloudGalleryPhotos) {
+      final resolved = await _resolveDisplayPhoto(photo);
+      if (resolved != null) return resolved;
+    }
+    for (final photo in _photos) {
+      final resolved = await _resolveDisplayPhoto(photo);
+      if (resolved != null) return resolved;
+    }
+    return _newestLocalCaptureFromDisk();
+  }
+
+  Future<AppPhoto?> _resolveDisplayPhoto(AppPhoto photo) async {
+    if (photo.hasLocalFile) {
+      if (await File(photo.localPath).exists()) return photo;
+    }
+    final recordId = photo.serverRecordId;
+    if (recordId != null && recordId > 0) {
+      final cachePath = await _cachePathForRecord(recordId);
+      if (await File(cachePath).exists()) {
+        return photo.copyWith(localPath: cachePath);
+      }
+    }
+    final url = photo.remoteUrl;
+    if (url != null && url.isNotEmpty) return photo;
+    return null;
+  }
+
+  Future<AppPhoto?> _newestLocalCaptureFromDisk() async {
+    try {
+      final dir = await _photosDirectory();
+      File? newest;
+      var newestMs = 0;
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (!name.startsWith('pet_') || !name.endsWith('.jpg')) continue;
+        final modified = (await entity.stat()).modified.millisecondsSinceEpoch;
+        if (modified > newestMs) {
+          newestMs = modified;
+          newest = entity;
+        }
+      }
+      if (newest == null) return null;
+      final baseName = p.basenameWithoutExtension(newest.path);
+      final id = baseName.startsWith('pet_')
+          ? baseName.substring('pet_'.length)
+          : baseName;
+      return AppPhoto(
+        id: id,
+        localPath: newest.path,
+        createdAtMs: newestMs,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 预热线程：快门时直接取路径，避免 await 目录/ID
@@ -126,11 +192,56 @@ class PhotoGalleryService {
     return cached;
   }
 
+  /// 连拍结束后，把尚未写入系统相册的本地成片依次同步（走串行队列）
+  Future<void> flushPendingSystemGallerySync() async {
+    await init();
+    final pendingIds = _photos
+        .where((photo) => photo.hasLocalFile && photo.galleryAssetId == null)
+        .map((photo) => photo.id)
+        .toList();
+    for (final id in pendingIds) {
+      await syncToSystemGallery(id);
+    }
+  }
+
   /// 原生已写入 [localPath] 后登记索引（无文件拷贝）
   Future<bool> registerCapture({
     required String id,
     required String localPath,
     int? soundEffectId,
+    double? captureLatitude,
+    double? captureLongitude,
+    bool upload = true,
+    bool syncToGallery = true,
+  }) {
+    final completer = Completer<bool>();
+    _captureRegisterTail = _captureRegisterTail
+        .then((_) => _registerCaptureImpl(
+              id: id,
+              localPath: localPath,
+              soundEffectId: soundEffectId,
+              captureLatitude: captureLatitude,
+              captureLongitude: captureLongitude,
+              upload: upload,
+              syncToGallery: syncToGallery,
+            ))
+        .then((ok) {
+      if (!completer.isCompleted) completer.complete(ok);
+      return ok;
+    }).catchError((Object e, StackTrace stack) {
+      debugPrint('PhotoGalleryService: registerCapture error: $e');
+      if (!completer.isCompleted) completer.complete(false);
+      return false;
+    });
+    return completer.future;
+  }
+
+  Future<bool> _registerCaptureImpl({
+    required String id,
+    required String localPath,
+    int? soundEffectId,
+    double? captureLatitude,
+    double? captureLongitude,
     bool upload = true,
     bool syncToGallery = true,
   }) async {
@@ -145,27 +256,60 @@ class PhotoGalleryService {
         id: id,
         localPath: localPath,
         createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        captureLatitude: captureLatitude,
+        captureLongitude: captureLongitude,
       );
       _photos.insert(0, photo);
     }
     unawaited(_persistIndex());
     if (upload) {
-      final uploaded =
-          await uploadRecordForPhoto(id, soundEffectId: soundEffectId);
+      final ok = await uploadRecordForPhoto(id, soundEffectId: soundEffectId);
       if (syncToGallery) {
-        await syncToSystemGallery(id);
+        unawaited(syncToSystemGallery(id));
       }
-      return uploaded;
+      return ok;
     }
     if (syncToGallery) {
-      unawaited(syncToSystemGallery(id));
+      await syncToSystemGallery(id);
     }
     return true;
   }
 
-  /// 等待进行中的 saveCameraRecord 上传完成（相册拉取前调用）
+  /// 等待进行中的成片登记、EXIF、上传与系统相册同步（相册拉取前调用）
   Future<void> waitForPendingUploads() async {
+    await _waitForCaptureSaveIdle();
+    await _captureRegisterTail;
+    await CaptureLocationService.instance.awaitPendingMetadataWrites();
+    await _retryPendingUploads();
     await _uploadTail;
+    await _gallerySyncTail;
+  }
+
+  /// 跟踪后台成片登记，避免进相册时漏等尚未入队的上传
+  Future<T> trackCaptureSave<T>(Future<T> Function() work) async {
+    _pendingCaptureSaveCount++;
+    try {
+      return await work();
+    } finally {
+      _pendingCaptureSaveCount--;
+    }
+  }
+
+  Future<void> _waitForCaptureSaveIdle() async {
+    while (_pendingCaptureSaveCount > 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    }
+  }
+
+  Future<void> _retryPendingUploads() async {
+    await init();
+    final pendingIds = _photos
+        .where((photo) => photo.recordId == null && photo.hasLocalFile)
+        .map((photo) => photo.id)
+        .toList();
+    for (final id in pendingIds) {
+      await uploadRecordForPhoto(id);
+    }
   }
 
   Future<void> _upsertCloudGalleryPhoto(AppPhoto uploaded) async {
@@ -180,23 +324,14 @@ class PhotoGalleryService {
       recordId: recordId,
       remoteUrl: remoteUrl,
       createdAtMs: uploaded.createdAtMs,
+      captureLatitude: uploaded.captureLatitude,
+      captureLongitude: uploaded.captureLongitude,
     );
     // 仅预缓存成片；相册列表以接口为准，不在此处写入展示列表
     await _materializeCloudPhotoCache(
       cloudPhoto,
       localCapture: uploaded,
     );
-  }
-
-  /// 成片落盘到最终路径后更新索引（不重复上传）
-  Future<void> updateCaptureLocalPath(String id, String localPath) async {
-    await init();
-    final index = _photos.indexWhere((photo) => photo.id == id);
-    if (index < 0) return;
-    if (!await File(localPath).exists()) return;
-
-    _photos[index] = _photos[index].copyWith(localPath: localPath);
-    await _persistIndex();
   }
 
   /// 先保存到应用目录；[moveFile] 为 true 时移动文件（裁切后更快）
@@ -322,9 +457,11 @@ class PhotoGalleryService {
       soundEffectId: soundEffectId,
     );
     if (!result.ok || result.recordId == null) {
-      debugPrint(
-        'PhotoGalleryService: uploadRecordForPhoto failed: ${result.msg}',
-      );
+      if (result.msg.isNotEmpty) {
+        debugPrint(
+          'PhotoGalleryService: uploadRecordForPhoto failed: ${result.msg}',
+        );
+      }
       return false;
     }
 
@@ -338,7 +475,7 @@ class PhotoGalleryService {
     }
     _rememberCaptureId(result.recordId!, photoId);
     await _persistIndex();
-    await _upsertCloudGalleryPhoto(updated);
+    unawaited(_upsertCloudGalleryPhoto(updated));
     return true;
   }
 
@@ -389,19 +526,80 @@ class PhotoGalleryService {
 
     fromApi.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
 
-    final cached = await Future.wait(
-      fromApi.map(
-        (photo) => _materializeCloudPhotoCache(
+    final cached = <AppPhoto>[];
+    for (final photo in fromApi) {
+      cached.add(
+        await _materializeCloudPhotoCache(
           photo,
           previous: previousByRecordId[photo.serverRecordId],
           localCapture: _findLocalPhotoByRecordId(photo.serverRecordId),
         ),
-      ),
-    );
+      );
+    }
 
-    await _pruneCloudCache(apiRecordIds);
-    _cloudGalleryPhotos = cached;
+    final merged = await _mergeLocalCapturesIntoCloudGallery(cached);
+
+    final activeRecordIds = {
+      ...apiRecordIds,
+      for (final photo in merged)
+        if (photo.serverRecordId != null) photo.serverRecordId!,
+    };
+    await _pruneCloudCache(activeRecordIds);
+    _cloudGalleryPhotos = merged;
     await _persistCloudGalleryIndex();
+  }
+
+  /// 接口列表有延迟时，补上本地已上传但尚未出现在列表里的成片
+  Future<List<AppPhoto>> _mergeLocalCapturesIntoCloudGallery(
+    List<AppPhoto> fromApi,
+  ) async {
+    final byRecordId = <int, AppPhoto>{
+      for (final photo in fromApi)
+        if (photo.serverRecordId != null) photo.serverRecordId!: photo,
+    };
+    final merged = List<AppPhoto>.from(fromApi);
+
+    for (final local in _photos) {
+      if (!local.hasLocalFile) continue;
+
+      final recordId = local.recordId;
+      final remoteUrl = local.remoteUrl;
+      if (recordId != null &&
+          recordId > 0 &&
+          remoteUrl != null &&
+          remoteUrl.isNotEmpty) {
+        if (byRecordId.containsKey(recordId)) continue;
+
+        merged.removeWhere((photo) => photo.id == local.id);
+
+        final cloudPhoto = AppPhoto(
+          id: 'record_$recordId',
+          localPath: local.localPath,
+          recordId: recordId,
+          remoteUrl: remoteUrl,
+          galleryAssetId: local.galleryAssetId,
+          createdAtMs: local.createdAtMs,
+          captureLatitude: local.captureLatitude,
+          captureLongitude: local.captureLongitude,
+        );
+        final materialized = await _materializeCloudPhotoCache(
+          cloudPhoto,
+          localCapture: local,
+        );
+        merged.add(materialized);
+        byRecordId[recordId] = materialized;
+        continue;
+      }
+
+      // 上传尚未完成时先用本地成片占位，避免连拍进相册漏图
+      if (merged.any((photo) => photo.id == local.id)) continue;
+      final ageMs = DateTime.now().millisecondsSinceEpoch - local.createdAtMs;
+      if (ageMs > const Duration(hours: 1).inMilliseconds) continue;
+      merged.add(local);
+    }
+
+    merged.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
+    return merged;
   }
 
   /// 删除应用内本地照片文件与索引（不影响云端记录）
@@ -431,8 +629,21 @@ class PhotoGalleryService {
     await _persistIndex();
   }
 
-  /// 后台写入系统相册并更新索引
-  Future<void> syncToSystemGallery(String photoId) async {
+  /// 后台写入系统相册并更新索引（串行队列，避免连拍时并发 saveImage 导致 OOM）
+  Future<void> syncToSystemGallery(String photoId) {
+    final completer = Completer<void>();
+    _gallerySyncTail = _gallerySyncTail
+        .then((_) => _syncToSystemGalleryImpl(photoId))
+        .then((_) {
+      if (!completer.isCompleted) completer.complete();
+    }).catchError((Object e, StackTrace stack) {
+      debugPrint('PhotoGalleryService: syncToSystemGallery error: $e');
+      if (!completer.isCompleted) completer.complete();
+    });
+    return completer.future;
+  }
+
+  Future<void> _syncToSystemGalleryImpl(String photoId) async {
     await init();
     final index = _photos.indexWhere((p) => p.id == photoId);
     if (index < 0 || _photos[index].galleryAssetId != null) return;
@@ -737,6 +948,58 @@ class PhotoGalleryService {
     return null;
   }
 
+  /// 调色盘读 EXIF 时优先本地成片（含 GPS），避免 cloud_cache 云端图无位置
+  Future<String?> metadataExifPathFor(AppPhoto photo) async {
+    await init();
+
+    final recordId = photo.serverRecordId;
+    if (recordId != null) {
+      final capture = _findLocalPhotoByRecordId(recordId);
+      if (capture != null && capture.hasLocalFile) {
+        final file = File(capture.localPath);
+        if (await file.exists()) return capture.localPath;
+      }
+    }
+
+    if (photo.hasLocalFile && !_isCloudCachePath(photo.localPath)) {
+      final file = File(photo.localPath);
+      if (await file.exists()) return photo.localPath;
+    }
+
+    if (photo.hasLocalFile) {
+      final file = File(photo.localPath);
+      if (await file.exists()) return photo.localPath;
+    }
+
+    return null;
+  }
+
+  /// 调色盘展示地点时优先读快门时缓存的坐标
+  Future<({double lat, double lng})?> captureCoordinatesFor(AppPhoto photo) async {
+    await init();
+    final direct = _coordinatesFromPhoto(photo);
+    if (direct != null) return direct;
+
+    final recordId = photo.serverRecordId;
+    if (recordId == null) return null;
+    return _coordinatesFromPhoto(_findLocalPhotoByRecordId(recordId));
+  }
+
+  ({double lat, double lng})? _coordinatesFromPhoto(AppPhoto? photo) {
+    if (photo == null || !photo.hasCaptureCoordinates) return null;
+    return (lat: photo.captureLatitude!, lng: photo.captureLongitude!);
+  }
+
+  AppPhoto _mergeCaptureMetadata(AppPhoto photo, AppPhoto? localCapture) {
+    if (localCapture == null) return photo;
+    return photo.copyWith(
+      captureLatitude: localCapture.captureLatitude ?? photo.captureLatitude,
+      captureLongitude: localCapture.captureLongitude ?? photo.captureLongitude,
+    );
+  }
+
+  bool _isCloudCachePath(String path) => path.contains(_cloudCacheFolder);
+
   Future<AppPhoto> _materializeCloudPhotoCache(
     AppPhoto photo, {
     AppPhoto? previous,
@@ -806,13 +1069,14 @@ class PhotoGalleryService {
     AppPhoto? localCapture,
     AppPhoto? previous,
   ) {
-    if (photo.galleryAssetId != null) return photo;
-    final recordId = photo.serverRecordId;
+    var result = _mergeCaptureMetadata(photo, localCapture);
+    if (result.galleryAssetId != null) return result;
+    final recordId = result.serverRecordId;
     final assetId = localCapture?.galleryAssetId ??
         previous?.galleryAssetId ??
         (recordId != null ? _galleryAssetByRecordId[recordId] : null);
-    if (assetId == null) return photo;
-    return photo.copyWith(galleryAssetId: assetId);
+    if (assetId == null) return result;
+    return result.copyWith(galleryAssetId: assetId);
   }
 
   String? _galleryAssetIdForRecord(int recordId) {
@@ -1017,6 +1281,32 @@ class PhotoGalleryService {
       final jsonList = _cloudGalleryPhotos.map((photo) => photo.toJson()).toList();
       await indexFile.writeAsString(jsonEncode(jsonList));
     } catch (_) {}
+  }
+
+  Future<void> _loadCloudGalleryIndex() async {
+    _cloudGalleryPhotos = [];
+    try {
+      final base = await getApplicationDocumentsDirectory();
+      final indexFile = File(p.join(base.path, _cloudGalleryIndexFileName));
+      if (!await indexFile.exists()) return;
+
+      final list = jsonDecode(await indexFile.readAsString()) as List<dynamic>;
+      for (final item in list) {
+        if (item is! Map) continue;
+        _cloudGalleryPhotos.add(
+          AppPhoto.fromJson(Map<String, dynamic>.from(item)),
+        );
+      }
+      _cloudGalleryPhotos.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
+
+      final hydrated = <AppPhoto>[];
+      for (final photo in _cloudGalleryPhotos) {
+        hydrated.add(await _resolveDisplayPhoto(photo) ?? photo);
+      }
+      _cloudGalleryPhotos = hydrated;
+    } catch (_) {
+      _cloudGalleryPhotos = [];
+    }
   }
 
   Future<Directory> _photosDirectory() async {

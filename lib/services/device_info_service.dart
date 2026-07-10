@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 
+import '../utils/ios_device_marketing_name.dart';
+
 /// 本机设备型号（用于元数据展示与写入 EXIF 的兜底）
 class DeviceInfoService {
   DeviceInfoService._();
@@ -53,12 +55,12 @@ class DeviceInfoService {
       if (Platform.isIOS) {
         final info = await _plugin.iosInfo;
         const make = 'Apple';
-        final model = info.utsname.machine.trim().isNotEmpty
-            ? info.utsname.machine.trim()
-            : info.model.trim();
+        final machine = info.utsname.machine.trim();
+        final model = iosMarketingName(machine) ??
+            (info.model.trim().isNotEmpty ? info.model.trim() : 'iPhone');
         _cachedMake = make;
-        _cachedModel = model.isNotEmpty ? model : null;
-        _cachedDisplayName = _joinParts([make, model]) ?? 'iPhone';
+        _cachedModel = model;
+        _cachedDisplayName = _joinParts([make, model]) ?? model;
         return _DeviceFields(
           displayName: _cachedDisplayName!,
           make: _cachedMake,
