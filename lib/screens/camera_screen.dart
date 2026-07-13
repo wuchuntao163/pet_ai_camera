@@ -78,8 +78,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   Future<void> _bootstrap() async {
     await _photoGallery.init();
     unawaited(DeviceInfoService.exifMakeModel());
+    await _photoGallery.refreshFromServer();
     if (mounted) {
-      final latest = await _photoGallery.latestDisplayPhoto();
+      final latest = await _photoGallery.latestGalleryThumbPhoto();
       setState(() => _applyGalleryThumbFromPhoto(latest, preferCloud: false));
     }
     await _initCamera();
@@ -116,7 +117,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   void _syncGalleryThumbFromLatest({required bool preferCloud}) {
     unawaited(() async {
-      final latest = await _photoGallery.latestDisplayPhoto();
+      final latest = await _photoGallery.latestGalleryThumbPhoto();
       if (!mounted) return;
       setState(() => _applyGalleryThumbFromPhoto(latest, preferCloud: preferCloud));
     }());
@@ -537,7 +538,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         }
       }
       await SidebarSoundStore.instance.stop();
-      unawaited(_flushPostCaptureWork());
+      unawaited(_flushPostCaptureWork(singleShot: burstCount == 1));
     } finally {
       if (mounted) {
         setState(() {
@@ -591,7 +592,10 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
-  Future<void> _flushPostCaptureWork() async {
+  Future<void> _flushPostCaptureWork({required bool singleShot}) async {
+    if (singleShot) {
+      await _photoGallery.awaitShutterUploadIdle();
+    }
     await CaptureLocationService.instance.flushDeferredMetadataWrites();
     await _photoGallery.flushPendingSystemGallerySync();
   }

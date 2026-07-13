@@ -60,6 +60,20 @@ class PhotoGalleryService {
     unawaited(warmCaptureSlot());
   }
 
+  /// 相机左下角缩略图：与相册页 [cloudGalleryPhotos] 同源（不含仅本地未入库成片）
+  Future<AppPhoto?> latestGalleryThumbPhoto() async {
+    await init();
+    final merged = await _mergeLocalCapturesIntoCloudGallery(
+      _cloudGalleryPhotos,
+      includePendingLocals: false,
+    );
+    for (final photo in merged) {
+      final resolved = await _resolveDisplayPhoto(photo);
+      if (resolved != null) return resolved;
+    }
+    return null;
+  }
+
   /// 相机左下角缩略图：优先本地/缓存，其次云端 URL
   Future<AppPhoto?> latestDisplayPhoto() async {
     await init();
@@ -283,6 +297,13 @@ class PhotoGalleryService {
     await _retryPendingUploads();
     await _uploadTail;
     await _gallerySyncTail;
+  }
+
+  /// 单张拍摄后处理前：等登记与上传完成，避免与 EXIF 写同一文件并发
+  Future<void> awaitShutterUploadIdle() async {
+    await _waitForCaptureSaveIdle();
+    await _captureRegisterTail;
+    await _uploadTail;
   }
 
   /// 跟踪后台成片登记，避免进相册时漏等尚未入队的上传
@@ -551,8 +572,9 @@ class PhotoGalleryService {
 
   /// 接口列表有延迟时，补上本地已上传但尚未出现在列表里的成片
   Future<List<AppPhoto>> _mergeLocalCapturesIntoCloudGallery(
-    List<AppPhoto> fromApi,
-  ) async {
+    List<AppPhoto> fromApi, {
+    bool includePendingLocals = true,
+  }) async {
     final byRecordId = <int, AppPhoto>{
       for (final photo in fromApi)
         if (photo.serverRecordId != null) photo.serverRecordId!: photo,
@@ -592,6 +614,7 @@ class PhotoGalleryService {
       }
 
       // 上传尚未完成时先用本地成片占位，避免连拍进相册漏图
+      if (!includePendingLocals) continue;
       if (merged.any((photo) => photo.id == local.id)) continue;
       final ageMs = DateTime.now().millisecondsSinceEpoch - local.createdAtMs;
       if (ageMs > const Duration(hours: 1).inMilliseconds) continue;

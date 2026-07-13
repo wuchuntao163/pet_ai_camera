@@ -126,11 +126,7 @@ class PhotoMetadataService {
     double? lng,
   ) async {
     if (!_isValidCoordinate(lat, lng)) return null;
-
-    final address = await _reverseGeocode(lat!, lng!);
-    if (address != null && address.isNotEmpty) return address;
-
-    return _formatCoordinates(lat, lng);
+    return _reverseGeocode(lat!, lng!);
   }
 
   static bool _isValidCoordinate(double? lat, double? lng) {
@@ -143,29 +139,48 @@ class PhotoMetadataService {
   static Future<String?> _reverseGeocode(double lat, double lng) async {
     try {
       final adjusted = ChinaCoordinate.forGeocoding(lat, lng);
-      final placemarks =
-          await placemarkFromCoordinates(adjusted.lat, adjusted.lng);
+      final placemarks = await placemarkFromCoordinates(
+        adjusted.lat,
+        adjusted.lng,
+      );
       if (placemarks.isEmpty) return null;
 
       final place = placemarks.first;
-      final parts = <String>[
-        if (_hasText(place.locality)) place.locality!,
-        if (_hasText(place.subAdministrativeArea)) place.subAdministrativeArea!,
-        if (_hasText(place.subLocality)) place.subLocality!,
-        if (_hasText(place.thoroughfare)) place.thoroughfare!,
-      ];
+      final parts = <String>[];
+
+      void addPart(String? value) {
+        if (!_hasText(value)) return;
+        final text = value!.trim();
+        if (parts.contains(text)) return;
+        if (_looksLikeCoordinateText(text)) return;
+        parts.add(text);
+      }
+
+      addPart(place.administrativeArea);
+      addPart(place.locality);
+      addPart(place.subAdministrativeArea);
+      addPart(place.subLocality);
+      addPart(place.thoroughfare);
+      addPart(place.street);
+
       if (parts.isNotEmpty) {
         return parts.join('');
       }
 
-      if (_hasText(place.administrativeArea)) return place.administrativeArea;
-
-      if (_hasText(place.street)) return place.street;
-      if (_hasText(place.name)) return place.name;
-      return null;
+      addPart(place.name);
+      return parts.isEmpty ? null : parts.join('');
     } catch (_) {
       return null;
     }
+  }
+
+  static bool _looksLikeCoordinateText(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return true;
+    if (text.contains('纬度') || text.contains('经度')) return true;
+    if (RegExp(r'^[+-]?\d+(?:\.\d+)?$').hasMatch(text)) return true;
+    if (RegExp(r'^\d+(?:\.\d+)?°[NSWE]$').hasMatch(text)) return true;
+    return false;
   }
 
   static bool _hasText(String? value) =>
@@ -177,15 +192,6 @@ class PhotoMetadataService {
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
     return '${value.year}年$month月$day日 $hour:$minute';
-  }
-
-  static String? _formatCoordinates(double? lat, double? lng) {
-    if (!_isValidCoordinate(lat, lng)) return null;
-    final latAbs = lat!.abs().toStringAsFixed(4);
-    final lngAbs = lng!.abs().toStringAsFixed(4);
-    final latDir = lat >= 0 ? 'N' : 'S';
-    final lngDir = lng >= 0 ? 'E' : 'W';
-    return '$latAbs°$latDir $lngAbs°$lngDir';
   }
 
   static Future<_ExifFields> _readExif(
@@ -221,6 +227,10 @@ class PhotoMetadataService {
           data['GPS GPSLongitudeRef']?.printable,
           data['GPS GPSLongitude']?.printable,
         );
+        if (!_isValidCoordinate(lat, lng)) {
+          lat = null;
+          lng = null;
+        }
       }
 
       return _ExifFields(

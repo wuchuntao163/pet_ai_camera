@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
@@ -14,6 +15,8 @@ class CaptureLocationService {
 
   static const _maxCacheAge = Duration(minutes: 10);
   static const _sessionReuseMaxAge = Duration(minutes: 2);
+  static const _peekMaxAge = Duration(seconds: 90);
+  static const _lastKnownMaxAge = Duration(minutes: 3);
   static const _maxAcceptableAccuracyMeters = 80.0;
   static const _waitForFixTimeout = Duration(seconds: 3);
 
@@ -35,10 +38,7 @@ class CaptureLocationService {
 
     await _subscription?.cancel();
     _subscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 3,
-      ),
+      locationSettings: _trackingSettings,
     ).listen(
       (position) => _rememberIfBetter(position),
       onError: (_) {},
@@ -97,11 +97,42 @@ class CaptureLocationService {
     return completer.future;
   }
 
-  /// 快门前读取已缓存坐标（不触发定位等待）
+  /// 快门前读取已缓存坐标（不触发定位等待；精度或时效不够则返回 null）
   ({double lat, double lng})? peekCachedCoordinates() {
-    final cached = _readCached(maxAge: _sessionReuseMaxAge);
+    final cached = _readCached(
+      maxAge: _peekMaxAge,
+      requireUsable: true,
+    );
     if (cached == null) return null;
     return (lat: cached.$1, lng: cached.$2);
+  }
+
+  LocationSettings get _trackingSettings {
+    if (Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 3,
+        intervalDuration: const Duration(seconds: 2),
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.best,
+      distanceFilter: 3,
+    );
+  }
+
+  LocationSettings get _captureFixSettings {
+    if (Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
+        timeLimit: const Duration(seconds: 6),
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.best,
+      timeLimit: Duration(seconds: 6),
+    );
   }
 
   /// 后台排队写 EXIF，调用方无需 await
@@ -156,7 +187,10 @@ class CaptureLocationService {
   Future<(double, double)?> _coordinatesForCapture({
     bool preferFast = false,
   }) async {
-    final session = _readCached(maxAge: _sessionReuseMaxAge);
+    final session = _readCached(
+      maxAge: _sessionReuseMaxAge,
+      requireUsable: true,
+    );
     if (session != null) return session;
 
     if (!preferFast) {
@@ -168,10 +202,7 @@ class CaptureLocationService {
       if (await _ensurePermission()) {
         try {
           final current = await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.best,
-              timeLimit: Duration(seconds: 6),
-            ),
+            locationSettings: _captureFixSettings,
           );
           if (_isUsable(current)) {
             _rememberIfBetter(current);
@@ -181,7 +212,7 @@ class CaptureLocationService {
       }
     }
 
-    final cached = _readCached(maxAge: _maxCacheAge);
+    final cached = _readCached(maxAge: _maxCacheAge, requireUsable: true);
     if (cached != null) return cached;
 
     if (!preferFast && await _ensurePermission()) {
@@ -200,30 +231,48 @@ class CaptureLocationService {
   Future<(double, double)?> _waitForAcceptableFix(Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      final cached = _readCached(maxAge: _sessionReuseMaxAge);
+      final cached = _readCached(
+        maxAge: _sessionReuseMaxAge,
+        requireUsable: true,
+      );
       if (cached != null && _positionUsable(_cached)) {
         return cached;
       }
       await Future.delayed(const Duration(milliseconds: 200));
     }
-    return _readCached(maxAge: _sessionReuseMaxAge);
+    return _readCached(
+      maxAge: _sessionReuseMaxAge,
+      requireUsable: true,
+    );
   }
 
-  (double, double)? _readCached({Duration? maxAge}) {
+  (double, double)? _readCached({
+    Duration? maxAge,
+    bool requireUsable = false,
+  }) {
     final position = _cached;
     if (position == null) return null;
     final limit = maxAge ?? _maxCacheAge;
     if (_cachedAt != null && DateTime.now().difference(_cachedAt!) > limit) {
       return null;
     }
+    if (requireUsable && !_positionUsable(position)) return null;
     if (!_isValid(position.latitude, position.longitude)) return null;
     return (position.latitude, position.longitude);
+  }
+
+  bool _isFresh(Position position, Duration maxAge) {
+    final timestamp = position.timestamp;
+    if (timestamp.millisecondsSinceEpoch <= 0) return true;
+    return DateTime.now().difference(timestamp) <= maxAge;
   }
 
   Future<void> _seedFromLastKnown() async {
     try {
       final last = await Geolocator.getLastKnownPosition();
-      if (last != null && _isUsable(last)) {
+      if (last != null &&
+          _isUsable(last) &&
+          _isFresh(last, _lastKnownMaxAge)) {
         _rememberIfBetter(last);
       }
     } catch (_) {}
@@ -232,10 +281,7 @@ class CaptureLocationService {
   Future<void> _refreshCurrentPosition() async {
     try {
       final current = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 8),
-        ),
+        locationSettings: _captureFixSettings,
       );
       if (_isUsable(current)) {
         _rememberIfBetter(current);

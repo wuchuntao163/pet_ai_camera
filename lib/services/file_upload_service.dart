@@ -24,12 +24,24 @@ class FileUploadService {
 
   /// 本地图片上传（拍摄成片、缩略图、导出图等）
   static Future<String> uploadLocalImage(String localPath) async {
-    return _upload(
-      ApiPaths.uploadLocalImage,
-      localPath: localPath,
-      fields: const {'type': 'image'},
-      debugLabel: 'uploadLocalImage',
-    );
+    ApiResponse<dynamic> res;
+    try {
+      res = await Api.upload(
+        ApiPaths.uploadLocalImage,
+        filePath: localPath,
+        filename: p.basename(localPath),
+        fields: const {'type': 'image'},
+      );
+    } on ApiException catch (e) {
+      _logUploadLocalImageFailure(e);
+      rethrow;
+    }
+    final url = _extractUrl(res.data);
+    _logUploadLocalImageSuccess(res.code, res.msg, url);
+    if (url == null || url.isEmpty) {
+      throw ApiException.business(0, '');
+    }
+    return resolveUrl(url);
   }
 
   /// 上传自定义音效音频，返回可用于 [sound_url] 的完整 URL
@@ -105,5 +117,19 @@ class FileUploadService {
       return data['url']?.toString() ?? data['image_url']?.toString();
     }
     return data?.toString();
+  }
+
+  static void _logUploadLocalImageSuccess(int code, String msg, String? url) {
+    if (!kDebugMode) return;
+    debugPrint('[uploadLocalImage] code=$code msg=$msg url=$url');
+  }
+
+  static void _logUploadLocalImageFailure(ApiException e) {
+    if (!kDebugMode) return;
+    if (e.isNetworkError) {
+      debugPrint('[uploadLocalImage] network error');
+      return;
+    }
+    debugPrint('[uploadLocalImage] code=${e.code} msg=${e.message}');
   }
 }
