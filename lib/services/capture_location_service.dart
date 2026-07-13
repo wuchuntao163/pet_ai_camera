@@ -15,9 +15,10 @@ class CaptureLocationService {
 
   static const _maxCacheAge = Duration(minutes: 10);
   static const _sessionReuseMaxAge = Duration(minutes: 2);
-  static const _peekMaxAge = Duration(seconds: 90);
+  static const _peekMaxAge = Duration(seconds: 120);
   static const _lastKnownMaxAge = Duration(minutes: 3);
   static const _maxAcceptableAccuracyMeters = 80.0;
+  static const _peekMaxAccuracyMeters = 150.0;
   static const _waitForFixTimeout = Duration(seconds: 3);
 
   StreamSubscription<Position>? _subscription;
@@ -63,8 +64,11 @@ class CaptureLocationService {
   }
 
   /// 写入 GPS、设备型号与拍摄时间到成片 EXIF，并返回本次使用的坐标
-  Future<({double lat, double lng})?> stampCaptureMetadata(String path) async {
-    final coords = await _coordinatesForCapture(preferFast: true);
+  Future<({double lat, double lng})?> stampCaptureMetadata(
+    String path, {
+    bool preferFast = false,
+  }) async {
+    final coords = await _coordinatesForCapture(preferFast: preferFast);
     final device = await DeviceInfoService.exifMakeModel();
     final capturedAt = DateTime.now();
     final ok = await NativeCameraChannel.writeCaptureMetadata(
@@ -83,10 +87,13 @@ class CaptureLocationService {
   }
 
   /// 串行写入 EXIF，避免连拍时多张同时落盘导致内存峰值
-  Future<({double lat, double lng})?> enqueueStampCaptureMetadata(String path) async {
+  Future<({double lat, double lng})?> enqueueStampCaptureMetadata(
+    String path, {
+    bool preferFast = false,
+  }) async {
     final completer = Completer<({double lat, double lng})?>();
     _metadataWriteTail = _metadataWriteTail
-        .then((_) => stampCaptureMetadata(path))
+        .then((_) => stampCaptureMetadata(path, preferFast: preferFast))
         .then((coords) {
       if (!completer.isCompleted) completer.complete(coords);
       return coords;
@@ -102,6 +109,7 @@ class CaptureLocationService {
     final cached = _readCached(
       maxAge: _peekMaxAge,
       requireUsable: true,
+      relaxedAccuracy: true,
     );
     if (cached == null) return null;
     return (lat: cached.$1, lng: cached.$2);
@@ -110,7 +118,7 @@ class CaptureLocationService {
   LocationSettings get _trackingSettings {
     if (Platform.isAndroid) {
       return AndroidSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: LocationAccuracy.best,
         distanceFilter: 3,
         intervalDuration: const Duration(seconds: 2),
       );
@@ -124,14 +132,14 @@ class CaptureLocationService {
   LocationSettings get _captureFixSettings {
     if (Platform.isAndroid) {
       return AndroidSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: LocationAccuracy.best,
         distanceFilter: 0,
-        timeLimit: const Duration(seconds: 6),
+        timeLimit: const Duration(seconds: 8),
       );
     }
     return const LocationSettings(
       accuracy: LocationAccuracy.best,
-      timeLimit: Duration(seconds: 6),
+      timeLimit: Duration(seconds: 8),
     );
   }
 
@@ -157,13 +165,19 @@ class CaptureLocationService {
     _deferredExifPaths.add(path);
   }
 
-  /// 连拍结束后依次写入排队中的 EXIF
-  Future<void> flushDeferredMetadataWrites() async {
+  /// 连拍结束后依次写入排队中的 EXIF，并返回成功写入的坐标
+  Future<List<({String path, double lat, double lng})>>
+      flushDeferredMetadataWrites() async {
     final paths = List<String>.from(_deferredExifPaths);
     _deferredExifPaths.clear();
+    final stamped = <({String path, double lat, double lng})>[];
     for (final path in paths) {
-      await enqueueStampCaptureMetadata(path);
+      final coords = await enqueueStampCaptureMetadata(path, preferFast: false);
+      if (coords != null) {
+        stamped.add((path: path, lat: coords.lat, lng: coords.lng));
+      }
     }
+    return stamped;
   }
 
   /// 等待排队中的 EXIF 写入全部完成（进相册前调用）
@@ -218,11 +232,23 @@ class CaptureLocationService {
     if (!preferFast && await _ensurePermission()) {
       try {
         final last = await Geolocator.getLastKnownPosition();
-        if (last != null && _isValid(last.latitude, last.longitude)) {
+        if (last != null &&
+            _isValid(last.latitude, last.longitude) &&
+            _isFresh(last, _lastKnownMaxAge) &&
+            _positionUsable(last, relaxed: true)) {
           _rememberIfBetter(last);
           return (last.latitude, last.longitude);
         }
       } catch (_) {}
+    }
+
+    if (preferFast) {
+      final relaxed = _readCached(
+        maxAge: _sessionReuseMaxAge,
+        requireUsable: true,
+        relaxedAccuracy: true,
+      );
+      if (relaxed != null) return relaxed;
     }
 
     return null;
@@ -249,6 +275,7 @@ class CaptureLocationService {
   (double, double)? _readCached({
     Duration? maxAge,
     bool requireUsable = false,
+    bool relaxedAccuracy = false,
   }) {
     final position = _cached;
     if (position == null) return null;
@@ -256,7 +283,10 @@ class CaptureLocationService {
     if (_cachedAt != null && DateTime.now().difference(_cachedAt!) > limit) {
       return null;
     }
-    if (requireUsable && !_positionUsable(position)) return null;
+    if (requireUsable &&
+        !_positionUsable(position, relaxed: relaxedAccuracy)) {
+      return null;
+    }
     if (!_isValid(position.latitude, position.longitude)) return null;
     return (position.latitude, position.longitude);
   }
@@ -305,11 +335,20 @@ class CaptureLocationService {
     }
   }
 
-  bool _positionUsable(Position? position) {
+  bool _positionUsable(Position? position, {bool relaxed = false}) {
     if (position == null) return false;
     if (!_isValid(position.latitude, position.longitude)) return false;
     final accuracy = _accuracyMeters(position);
-    return accuracy <= _maxAcceptableAccuracyMeters;
+    if (accuracy == double.infinity) {
+      return _isFresh(
+        position,
+        Duration(seconds: relaxed ? 90 : 45),
+      );
+    }
+    final limit = relaxed
+        ? (Platform.isAndroid ? _peekMaxAccuracyMeters : _maxAcceptableAccuracyMeters)
+        : _maxAcceptableAccuracyMeters;
+    return accuracy <= limit;
   }
 
   bool _isUsable(Position position) {

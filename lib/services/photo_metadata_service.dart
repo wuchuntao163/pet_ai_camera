@@ -139,39 +139,47 @@ class PhotoMetadataService {
   static Future<String?> _reverseGeocode(double lat, double lng) async {
     try {
       final adjusted = ChinaCoordinate.forGeocoding(lat, lng);
-      final placemarks = await placemarkFromCoordinates(
-        adjusted.lat,
-        adjusted.lng,
-      );
-      if (placemarks.isEmpty) return null;
+      final fromAdjusted = await _placemarksToAddress(adjusted.lat, adjusted.lng);
+      if (fromAdjusted != null) return fromAdjusted;
 
-      final place = placemarks.first;
-      final parts = <String>[];
-
-      void addPart(String? value) {
-        if (!_hasText(value)) return;
-        final text = value!.trim();
-        if (parts.contains(text)) return;
-        if (_looksLikeCoordinateText(text)) return;
-        parts.add(text);
+      if (ChinaCoordinate.isInChina(lat, lng)) {
+        final fromRaw = await _placemarksToAddress(lat, lng);
+        if (fromRaw != null) return fromRaw;
       }
-
-      addPart(place.administrativeArea);
-      addPart(place.locality);
-      addPart(place.subAdministrativeArea);
-      addPart(place.subLocality);
-      addPart(place.thoroughfare);
-      addPart(place.street);
-
-      if (parts.isNotEmpty) {
-        return parts.join('');
-      }
-
-      addPart(place.name);
-      return parts.isEmpty ? null : parts.join('');
+      return null;
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<String?> _placemarksToAddress(double lat, double lng) async {
+    final placemarks = await placemarkFromCoordinates(lat, lng);
+    if (placemarks.isEmpty) return null;
+
+    final place = placemarks.first;
+    final parts = <String>[];
+
+    void addPart(String? value) {
+      if (!_hasText(value)) return;
+      final text = value!.trim();
+      if (parts.contains(text)) return;
+      if (_looksLikeCoordinateText(text)) return;
+      parts.add(text);
+    }
+
+    addPart(place.administrativeArea);
+    addPart(place.locality);
+    addPart(place.subAdministrativeArea);
+    addPart(place.subLocality);
+    addPart(place.thoroughfare);
+    addPart(place.street);
+
+    if (parts.isNotEmpty) {
+      return parts.join('');
+    }
+
+    addPart(place.name);
+    return parts.isEmpty ? null : parts.join('');
   }
 
   static bool _looksLikeCoordinateText(String value) {

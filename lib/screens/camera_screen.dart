@@ -596,7 +596,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     if (singleShot) {
       await _photoGallery.awaitShutterUploadIdle();
     }
-    await CaptureLocationService.instance.flushDeferredMetadataWrites();
+    final stamped =
+        await CaptureLocationService.instance.flushDeferredMetadataWrites();
+    await _photoGallery.applyCaptureCoordinates(stamped);
     await _photoGallery.flushPendingSystemGallerySync();
   }
 

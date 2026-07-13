@@ -218,6 +218,27 @@ class PhotoGalleryService {
     }
   }
 
+  /// EXIF 写入后回写坐标，避免快门时缓存未就绪导致调色盘无位置
+  Future<void> applyCaptureCoordinates(
+    List<({String path, double lat, double lng})> stamped,
+  ) async {
+    if (stamped.isEmpty) return;
+    await init();
+    var changed = false;
+    for (final item in stamped) {
+      final index = _photos.indexWhere((photo) => photo.localPath == item.path);
+      if (index < 0) continue;
+      _photos[index] = _photos[index].copyWith(
+        captureLatitude: item.lat,
+        captureLongitude: item.lng,
+      );
+      changed = true;
+    }
+    if (changed) {
+      await _persistIndex();
+    }
+  }
+
   /// 原生已写入 [localPath] 后登记索引（无文件拷贝）
   Future<bool> registerCapture({
     required String id,
