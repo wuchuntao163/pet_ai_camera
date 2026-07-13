@@ -138,31 +138,60 @@ class PhotoMetadataService {
 
   static Future<String?> _reverseGeocode(double lat, double lng) async {
     try {
-      final adjusted = ChinaCoordinate.forGeocoding(lat, lng);
-      final fromAdjusted = await _placemarksToAddress(adjusted.lat, adjusted.lng);
-      if (fromAdjusted != null) return fromAdjusted;
-
-      if (ChinaCoordinate.isInChina(lat, lng)) {
-        final fromRaw = await _placemarksToAddress(lat, lng);
-        if (fromRaw != null) return fromRaw;
+      if (!ChinaCoordinate.isInChina(lat, lng)) {
+        return (await _placemarkCandidate(lat, lng))?.address;
       }
-      return null;
+
+      final gcj = ChinaCoordinate.forGeocoding(lat, lng);
+
+      // Android 部分机型定位已是 GCJ-02，再转换会二次偏移；双候选取更细地址
+      if (Platform.isAndroid) {
+        final candidates = await Future.wait([
+          _placemarkCandidate(lat, lng),
+          _placemarkCandidate(gcj.lat, gcj.lng),
+        ]);
+        return _bestAddress(candidates);
+      }
+
+      final fromAdjusted = await _placemarkCandidate(gcj.lat, gcj.lng);
+      if (fromAdjusted != null) return fromAdjusted.address;
+      return (await _placemarkCandidate(lat, lng))?.address;
     } catch (_) {
       return null;
     }
   }
 
-  static Future<String?> _placemarksToAddress(double lat, double lng) async {
+  static String? _bestAddress(List<_AddressCandidate?> candidates) {
+    _AddressCandidate? best;
+    for (final candidate in candidates) {
+      if (candidate == null) continue;
+      if (best == null || candidate.score > best.score) {
+        best = candidate;
+      }
+    }
+    return best?.address;
+  }
+
+  static Future<_AddressCandidate?> _placemarkCandidate(
+    double lat,
+    double lng,
+  ) async {
     final placemarks = await placemarkFromCoordinates(lat, lng);
     if (placemarks.isEmpty) return null;
 
     final place = placemarks.first;
+    final address = _formatPlacemark(place);
+    if (address == null || address.isEmpty) return null;
+    return _AddressCandidate(address, _scorePlacemark(place, address));
+  }
+
+  static String? _formatPlacemark(Placemark place) {
     final parts = <String>[];
 
     void addPart(String? value) {
       if (!_hasText(value)) return;
-      final text = value!.trim();
-      if (parts.contains(text)) return;
+      final text = _sanitizeAddressPart(value!.trim());
+      if (text == null || text.isEmpty) return;
       if (_looksLikeCoordinateText(text)) return;
       parts.add(text);
     }
@@ -172,14 +201,72 @@ class PhotoMetadataService {
     addPart(place.subAdministrativeArea);
     addPart(place.subLocality);
     addPart(place.thoroughfare);
-    addPart(place.street);
 
-    if (parts.isNotEmpty) {
-      return parts.join('');
+    if (parts.isEmpty) {
+      addPart(place.name);
     }
 
-    addPart(place.name);
-    return parts.isEmpty ? null : parts.join('');
+    final joined = _joinAddressParts(parts);
+    if (joined.isEmpty) return null;
+    return _truncateAfterRoad(joined);
+  }
+
+  /// 只保留到路名（含「路」「大道」），后面的门牌、楼栋等一律去掉。
+  static String _truncateAfterRoad(String address) {
+    final match = RegExp(r'路|大道').firstMatch(address);
+    if (match == null) return address;
+    return address.substring(0, match.end);
+  }
+
+  /// 拼接时去掉 Android 常见的重叠字段，如「罗湖区」+「罗湖区」、「蜜园路」+「蜜园路」。
+  static String _joinAddressParts(List<String> parts) {
+    var result = '';
+    for (final part in parts) {
+      if (part.isEmpty) continue;
+      if (result.isEmpty) {
+        result = part;
+        continue;
+      }
+      if (result.contains(part)) continue;
+      if (part.contains(result)) {
+        result = part;
+        continue;
+      }
+      if (result.endsWith(part)) continue;
+      result += part;
+    }
+    return result;
+  }
+
+  /// 过滤行政街道、巷弄及门牌号，保留省市区与路名等常规信息。
+  static String? _sanitizeAddressPart(String text) {
+    if (text.isEmpty) return null;
+
+    // 不显示行政「xx街道」
+    if (RegExp(r'街道$').hasMatch(text)) return null;
+
+    // 不显示以「巷」结尾的巷弄名
+    if (RegExp(r'巷$').hasMatch(text)) return null;
+
+    // 去掉门牌号，如「蜜园路88号」→「蜜园路」
+    var cleaned = text.replaceAll(RegExp(r'\d+号'), '');
+    cleaned = cleaned.replaceAll(RegExp(r'号\d*'), '');
+    cleaned = cleaned.trim();
+    if (cleaned.isEmpty) return null;
+
+    return cleaned;
+  }
+
+  static int _scorePlacemark(Placemark place, String address) {
+    var score = 0;
+    if (_hasText(place.thoroughfare)) score += 25;
+    if (_hasText(place.subLocality) &&
+        !RegExp(r'街道$').hasMatch(place.subLocality!.trim())) {
+      score += 8;
+    }
+    if (RegExp(r'[路大道]').hasMatch(address)) score += 10;
+    if (RegExp(r'街道$').hasMatch(address)) score -= 12;
+    return score;
   }
 
   static bool _looksLikeCoordinateText(String value) {
@@ -358,4 +445,11 @@ class _ExifFields {
     this.lng,
     this.device,
   });
+}
+
+class _AddressCandidate {
+  final String address;
+  final int score;
+
+  const _AddressCandidate(this.address, this.score);
 }
