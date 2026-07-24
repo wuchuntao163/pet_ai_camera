@@ -72,7 +72,7 @@ class NativeCaptureResult {
 
 /// 原生相机 MethodChannel（Android CameraX / iOS AVFoundation）
 class NativeCameraChannel {
-  static const _channel = MethodChannel('com.example.pet_ai_camera/native_camera');
+  static const _channel = MethodChannel('com.mcxj.flutterPetCamera/native_camera');
 
   static Future<NativeCameraInitResult> initialize() async {
     if (!Platform.isAndroid && !Platform.isIOS) {

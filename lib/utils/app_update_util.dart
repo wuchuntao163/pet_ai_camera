@@ -12,7 +12,7 @@ import '../widgets/toast_message.dart';
 class AppUpdateUtil {
   AppUpdateUtil._();
 
-  static const _androidPackage = 'com.example.pet_ai_camera';
+  static const _androidPackage = 'com.mcxj.flutterPetCamera';
 
   static final _cache = AppCacheStore.instance;
 

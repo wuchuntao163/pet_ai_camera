@@ -1,4 +1,4 @@
-package com.example.pet_ai_camera.native_camera
+package com.mcxj.flutterPetCamera.native_camera
 
 import android.content.Context
 import android.graphics.Color

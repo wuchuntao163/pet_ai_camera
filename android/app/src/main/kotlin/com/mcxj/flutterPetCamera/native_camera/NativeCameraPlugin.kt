@@ -1,4 +1,4 @@
-package com.example.pet_ai_camera.native_camera
+package com.mcxj.flutterPetCamera.native_camera
 
 import android.app.Activity
 import androidx.lifecycle.LifecycleOwner
@@ -11,7 +11,7 @@ import java.io.File
 
 class NativeCameraPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
     companion object {
-        const val CHANNEL = "com.example.pet_ai_camera/native_camera"
+        const val CHANNEL = "com.mcxj.flutterPetCamera/native_camera"
         const val VIEW_TYPE = "native-camera-preview"
 
         var currentActivity: LifecycleOwner? = null

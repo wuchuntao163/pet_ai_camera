@@ -448,7 +448,7 @@ final class NativeCameraPlatformView: NSObject, FlutterPlatformView {
 final class NativeCameraPlugin: NSObject, FlutterPlugin {
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
-      name: "com.example.pet_ai_camera/native_camera",
+      name: "com.mcxj.flutterPetCamera/native_camera",
       binaryMessenger: registrar.messenger()
     )
     let instance = NativeCameraPlugin()

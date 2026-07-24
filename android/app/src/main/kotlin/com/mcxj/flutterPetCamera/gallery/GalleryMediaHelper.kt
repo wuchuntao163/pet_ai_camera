@@ -1,4 +1,4 @@
-package com.example.pet_ai_camera.gallery
+package com.mcxj.flutterPetCamera.gallery
 
 import android.app.Activity
 import android.app.RecoverableSecurityException

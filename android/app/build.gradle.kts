@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.pet_ai_camera"
+    namespace = "com.mcxj.flutterPetCamera"
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
@@ -23,7 +23,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.pet_ai_camera"
+        applicationId = "com.mcxj.flutterPetCamera"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = maxOf(flutter.minSdkVersion, 23)

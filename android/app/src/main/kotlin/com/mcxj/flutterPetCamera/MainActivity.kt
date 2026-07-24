@@ -1,7 +1,7 @@
-package com.example.pet_ai_camera
+package com.mcxj.flutterPetCamera
 
-import com.example.pet_ai_camera.gallery.GalleryMediaPlugin
-import com.example.pet_ai_camera.native_camera.NativeCameraPlugin
+import com.mcxj.flutterPetCamera.gallery.GalleryMediaPlugin
+import com.mcxj.flutterPetCamera.native_camera.NativeCameraPlugin
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
