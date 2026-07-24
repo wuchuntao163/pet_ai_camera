@@ -1,0 +1,13 @@
+// =============================================================================
+// 只改本文件即可。远程 / 本地二选一：启用一套，另一套全部加 //
+// =============================================================================
+
+// ----- 远程（Miao Huang，com.mcxj.flutterPetCamera）-----
+BUNDLE_ID_PREFIX = com.mcxj.flutterPetCamera
+RUNNER_BUNDLE_ID = $(BUNDLE_ID_PREFIX)
+DEVELOPMENT_TEAM = KRAA4XPHNJ
+
+// ----- 本地（com.example.pet_ai_camera）-----
+// BUNDLE_ID_PREFIX = com.example.pet_ai_camera
+// RUNNER_BUNDLE_ID = $(BUNDLE_ID_PREFIX)
+// DEVELOPMENT_TEAM = 6F6CQ97L3K

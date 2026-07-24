@@ -1,0 +1,6 @@
+// 参考用，与 Signing.xcconfig 本地段一致。
+// 复制为 Signing.local.xcconfig 后取消注释，可覆盖 Signing.xcconfig 中的值。
+
+// BUNDLE_ID_PREFIX = com.example.pet_ai_camera
+// RUNNER_BUNDLE_ID = $(BUNDLE_ID_PREFIX)
+// DEVELOPMENT_TEAM = 6F6CQ97L3K
