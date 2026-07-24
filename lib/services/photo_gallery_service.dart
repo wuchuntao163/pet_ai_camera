@@ -206,7 +206,7 @@ class PhotoGalleryService {
     return cached;
   }
 
-  /// 连拍结束后，把尚未写入系统相册的本地成片依次同步（走串行队列）
+  /// 连拍结束后，把尚未写入系统相册的本地成片入队后台同步
   Future<void> flushPendingSystemGallerySync() async {
     await init();
     final pendingIds = _photos
@@ -214,7 +214,8 @@ class PhotoGalleryService {
         .map((photo) => photo.id)
         .toList();
     for (final id in pendingIds) {
-      await syncToSystemGallery(id);
+      // 入队即可，由 _gallerySyncTail 串行执行，调用方不必等写完
+      unawaited(syncToSystemGallery(id));
     }
   }
 
@@ -300,24 +301,51 @@ class PhotoGalleryService {
     if (upload) {
       final ok = await uploadRecordForPhoto(id, soundEffectId: soundEffectId);
       if (syncToGallery) {
+        // 写系统相册走后台队列，不阻塞登记/上传
         unawaited(syncToSystemGallery(id));
       }
       return ok;
     }
     if (syncToGallery) {
-      await syncToSystemGallery(id);
+      unawaited(syncToSystemGallery(id));
     }
     return true;
   }
 
-  /// 等待进行中的成片登记、EXIF、上传与系统相册同步（相册拉取前调用）
+  /// 等待成片登记、EXIF、上传；系统相册同步不阻塞
   Future<void> waitForPendingUploads() async {
+    final total = Stopwatch()..start();
+
+    var sw = Stopwatch()..start();
     await _waitForCaptureSaveIdle();
+    debugPrint(
+      '[GalleryLoad] wait.captureSaveIdle ${sw.elapsedMilliseconds}ms',
+    );
+
+    sw = Stopwatch()..start();
     await _captureRegisterTail;
+    debugPrint(
+      '[GalleryLoad] wait.captureRegisterTail ${sw.elapsedMilliseconds}ms',
+    );
+
+    sw = Stopwatch()..start();
     await CaptureLocationService.instance.awaitPendingMetadataWrites();
+    debugPrint('[GalleryLoad] wait.exif ${sw.elapsedMilliseconds}ms');
+
+    sw = Stopwatch()..start();
     await _retryPendingUploads();
+    debugPrint(
+      '[GalleryLoad] wait.retryPendingUploads ${sw.elapsedMilliseconds}ms',
+    );
+
+    sw = Stopwatch()..start();
     await _uploadTail;
-    await _gallerySyncTail;
+    debugPrint('[GalleryLoad] wait.uploadTail ${sw.elapsedMilliseconds}ms');
+
+    total.stop();
+    debugPrint(
+      '[GalleryLoad] waitForPendingUploads.total ${total.elapsedMilliseconds}ms',
+    );
   }
 
   /// 单张拍摄后处理前：等登记与上传完成，避免与 EXIF 写同一文件并发
@@ -459,7 +487,49 @@ class PhotoGalleryService {
     return (ok: true, msg: '');
   }
 
-  /// 上传本地照片并调用 saveCameraRecord；成功则写入云端相册列表
+  /// 导出卡片保存到 App 相册并上传；随后后台写入系统相册（记 assetId，便于一并删除）。
+  Future<({bool ok, String msg})> saveExportedCard({
+    required String sourcePath,
+    double? captureLatitude,
+    double? captureLongitude,
+  }) async {
+    await init();
+    final source = File(sourcePath);
+    if (!await source.exists()) {
+      return (ok: false, msg: '保存照片失败');
+    }
+
+    final photosDir = await _photosDirectory();
+    final id = _nextPhotoId();
+    final destPath = p.join(photosDir.path, 'pet_${id}_export.png');
+
+    try {
+      await source.copy(destPath);
+    } catch (_) {
+      return (ok: false, msg: '保存照片失败');
+    }
+
+    final uploaded = await registerCapture(
+      id: id,
+      localPath: destPath,
+      captureLatitude: captureLatitude,
+      captureLongitude: captureLongitude,
+      syncToGallery: false,
+    );
+    if (!uploaded) {
+      return (ok: false, msg: '保存记录失败，请重试');
+    }
+
+    final index = _photos.indexWhere((item) => item.id == id);
+    if (index < 0 || _photos[index].recordId == null) {
+      return (ok: false, msg: '保存记录失败，请重试');
+    }
+
+    await refreshFromServer();
+    // 后台写入系统相册并记录 assetId，App 相册删除时可一并删除
+    unawaited(syncToSystemGallery(id));
+    return (ok: true, msg: '');
+  }
   Future<bool> uploadRecordForPhoto(
     String photoId, {
     int? soundEffectId,
@@ -523,6 +593,7 @@ class PhotoGalleryService {
 
   /// 从接口拉取拍摄记录（接口为唯一数据源），并缓存图片到本地
   Future<void> refreshFromServer({int recordType = 1}) async {
+    final total = Stopwatch()..start();
     await init();
 
     final previousByRecordId = <int, AppPhoto>{};
@@ -533,11 +604,20 @@ class PhotoGalleryService {
       }
     }
 
+    var sw = Stopwatch()..start();
     try {
       await CameraRecordStore.instance.fetchList(recordType: recordType);
     } catch (_) {
+      debugPrint(
+        '[GalleryLoad] refresh.fetchList failed '
+        '${sw.elapsedMilliseconds}ms',
+      );
       return;
     }
+    debugPrint(
+      '[GalleryLoad] refresh.fetchList ${sw.elapsedMilliseconds}ms '
+      '(records=${CameraRecordStore.instance.records.length})',
+    );
 
     final records = CameraRecordStore.instance.records;
     final fromApi = <AppPhoto>[];
@@ -568,27 +648,65 @@ class PhotoGalleryService {
 
     fromApi.sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
 
+    sw = Stopwatch()..start();
+    var downloadMs = 0;
+    var downloads = 0;
+    var cacheHits = 0;
     final cached = <AppPhoto>[];
     for (final photo in fromApi) {
-      cached.add(
-        await _materializeCloudPhotoCache(
-          photo,
-          previous: previousByRecordId[photo.serverRecordId],
-          localCapture: _findLocalPhotoByRecordId(photo.serverRecordId),
-        ),
+      final recordId = photo.serverRecordId!;
+      final cachePath = await _cachePathForRecord(recordId);
+      final hadCache =
+          await File(cachePath).exists() && await File(cachePath).length() > 0;
+      final itemSw = Stopwatch()..start();
+      final materialized = await _materializeCloudPhotoCache(
+        photo,
+        previous: previousByRecordId[recordId],
+        localCapture: _findLocalPhotoByRecordId(recordId),
       );
+      itemSw.stop();
+      if (hadCache) {
+        cacheHits++;
+      } else if (materialized.hasLocalFile) {
+        downloads++;
+        downloadMs += itemSw.elapsedMilliseconds;
+        debugPrint(
+          '[GalleryLoad] refresh.cacheFill record=$recordId '
+          '${itemSw.elapsedMilliseconds}ms',
+        );
+      }
+      cached.add(materialized);
     }
+    debugPrint(
+      '[GalleryLoad] refresh.materialize ${sw.elapsedMilliseconds}ms '
+      '(items=${fromApi.length}, cacheHit=$cacheHits, filled=$downloads, '
+      'fillSum=${downloadMs}ms)',
+    );
 
+    sw = Stopwatch()..start();
     final merged = await _mergeLocalCapturesIntoCloudGallery(cached);
+    debugPrint(
+      '[GalleryLoad] refresh.merge ${sw.elapsedMilliseconds}ms '
+      '(merged=${merged.length})',
+    );
 
     final activeRecordIds = {
       ...apiRecordIds,
       for (final photo in merged)
         if (photo.serverRecordId != null) photo.serverRecordId!,
     };
+    sw = Stopwatch()..start();
     await _pruneCloudCache(activeRecordIds);
     _cloudGalleryPhotos = merged;
     await _persistCloudGalleryIndex();
+    debugPrint(
+      '[GalleryLoad] refresh.persist ${sw.elapsedMilliseconds}ms',
+    );
+
+    total.stop();
+    debugPrint(
+      '[GalleryLoad] refreshFromServer.total ${total.elapsedMilliseconds}ms',
+    );
   }
 
   /// 接口列表有延迟时，补上本地已上传但尚未出现在列表里的成片
@@ -705,6 +823,16 @@ class PhotoGalleryService {
     if (recordId != null && recordId > 0) {
       _rememberGalleryAsset(recordId, galleryAssetId);
       _rememberCaptureId(recordId, photoId);
+      final cloudIndex = _cloudGalleryPhotos.indexWhere(
+        (item) => item.serverRecordId == recordId,
+      );
+      if (cloudIndex >= 0) {
+        _cloudGalleryPhotos[cloudIndex] =
+            _cloudGalleryPhotos[cloudIndex].copyWith(
+          galleryAssetId: galleryAssetId,
+        );
+        unawaited(_persistCloudGalleryIndex());
+      }
     }
     await _persistIndex();
   }

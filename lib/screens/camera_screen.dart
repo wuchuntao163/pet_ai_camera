@@ -544,6 +544,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         setState(() {
           _isCapturing = false;
           _countdown = null;
+          _isGalleryLoading = false;
         });
       }
     }
@@ -599,7 +600,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     final stamped =
         await CaptureLocationService.instance.flushDeferredMetadataWrites();
     await _photoGallery.applyCaptureCoordinates(stamped);
-    await _photoGallery.flushPendingSystemGallerySync();
+    unawaited(_photoGallery.flushPendingSystemGallerySync());
   }
 
   Future<bool> _moveCaptureToReserved(String sourcePath, String destPath) async {
@@ -665,6 +666,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   Future<void> _openPhotoGallery() async {
     _closePopup();
+    if (_isGalleryLoading) {
+      _stopGalleryLoading();
+    }
     if (!await _photoGallery.ensurePermission()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -684,7 +688,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
 
     try {
-      await _photoGallery.waitForPendingUploads();
+      // 立刻进相册，不在相机页死等上传（否则拍照后点相册会像卡住）
       await router.push<void>(AppRoutes.gallery);
     } finally {
       if (mounted && shouldResumeCamera) {

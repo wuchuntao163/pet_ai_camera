@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -12,6 +13,7 @@ import '../constants/app_colors.dart';
 import '../constants/app_images.dart';
 import '../models/app_photo.dart';
 import '../router/app_routes.dart';
+import '../router/gallery_navigation.dart';
 import '../screens/system_photo_picker_screen.dart';
 import '../services/file_upload_service.dart';
 import '../services/photo_gallery_service.dart';
@@ -44,7 +46,11 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
 
   late AppPhoto _photo;
   bool _loading = true;
-  bool _exportSquareCorners = false;
+  bool _autoUploading = false;
+  bool _autoUploadDone = false;
+  bool _cardImageReady = false;
+  int _autoUploadToken = 0;
+  Completer<void>? _exportImageReadyCompleter;
   PhotoMetadata? _metadata;
   Color _bandColor = Colors.white;
   String? _resolvedImageUrl;
@@ -57,6 +63,10 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
   }
 
   Future<void> _loadContent() async {
+    _autoUploadToken++;
+    _autoUploadDone = false;
+    _cardImageReady = false;
+    _resetExportImageWaiter();
     setState(() {
       _loading = true;
       _resolvedImageUrl = null;
@@ -87,6 +97,86 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
       _resolvedImageUrl = resolvedUrl;
       _loading = false;
     });
+    unawaited(_runAutoUploadFlow(_autoUploadToken));
+  }
+
+  void _resetExportImageWaiter() {
+    _exportImageReadyCompleter = Completer<void>();
+  }
+
+  Future<void> _waitForExportImageReady() async {
+    final waiter = _exportImageReadyCompleter;
+    if (waiter != null && !waiter.isCompleted) {
+      try {
+        await waiter.future.timeout(const Duration(seconds: 20));
+      } catch (_) {}
+    }
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  void _markExportImageReady() {
+    _cardImageReady = true;
+    final waiter = _exportImageReadyCompleter;
+    if (waiter != null && !waiter.isCompleted) {
+      waiter.complete();
+    }
+  }
+
+  void _onExportCardImageReady() {
+    _markExportImageReady();
+    if (!mounted || _loading || _metadata == null || _autoUploadDone) return;
+    unawaited(_autoUploadToAppGallery(_autoUploadToken));
+  }
+
+  Future<void> _runAutoUploadFlow(int token) async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted || token != _autoUploadToken || _autoUploadDone) return;
+
+    for (var i = 0; i < 200; i++) {
+      if (!mounted || token != _autoUploadToken || _autoUploadDone) return;
+      if (_loading || _metadata == null) {
+        await Future.delayed(const Duration(milliseconds: 20));
+        continue;
+      }
+      if (_cardImageReady) {
+        await _autoUploadToAppGallery(token);
+        return;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      await Future.delayed(const Duration(milliseconds: 20));
+    }
+
+    if (mounted && token == _autoUploadToken && !_autoUploadDone) {
+      await _autoUploadToAppGallery(token);
+    }
+  }
+
+  Future<void> _autoUploadToAppGallery(int token) async {
+    if (_autoUploadDone || token != _autoUploadToken) return;
+    if (_autoUploading || _loading || _metadata == null || !mounted) return;
+    _autoUploading = true;
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
+      if (token != _autoUploadToken || !mounted || _metadata == null) return;
+
+      final bytes = await _captureCardPng();
+      if (bytes == null) return;
+      final path = await _writeTempPng(bytes);
+      if (path == null) return;
+
+      final stored = await widget.galleryService.captureCoordinatesFor(_photo);
+      await widget.galleryService.saveExportedCard(
+        sourcePath: path,
+        captureLatitude: stored?.lat ?? _photo.captureLatitude,
+        captureLongitude: stored?.lng ?? _photo.captureLongitude,
+      );
+      _autoUploadDone = true;
+    } catch (e, stack) {
+      debugPrint('PhotoPaletteScreen: auto upload failed: $e\n$stack');
+    } finally {
+      _autoUploading = false;
+    }
   }
 
   String? _displayLocalPath() {
@@ -130,22 +220,22 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
   }
 
   Future<Uint8List?> _captureCardPng() async {
-    setState(() => _exportSquareCorners = true);
-    await WidgetsBinding.instance.endOfFrame;
-    await Future.delayed(const Duration(milliseconds: 100));
-    try {
+    for (var attempt = 0; attempt < 20; attempt++) {
+      await WidgetsBinding.instance.endOfFrame;
       final boundary = _exportKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
-      if (boundary == null) return null;
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
-      return byteData?.buffer.asUint8List();
-    } finally {
-      if (mounted) {
-        setState(() => _exportSquareCorners = false);
+      if (boundary != null) {
+        try {
+          final image = await boundary.toImage(pixelRatio: 3.0);
+          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+          image.dispose();
+          final bytes = byteData?.buffer.asUint8List();
+          if (bytes != null && bytes.isNotEmpty) return bytes;
+        } catch (_) {}
       }
+      await Future.delayed(const Duration(milliseconds: 32));
     }
+    return null;
   }
 
   Future<String?> _writeTempPng(Uint8List bytes) async {
@@ -157,6 +247,7 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
   }
 
   Future<void> _saveToGallery() async {
+    await _waitForExportImageReady();
     final bytes = await _captureCardPng();
     if (bytes == null) {
       if (mounted) ToastMessage.show(context, '保存失败，请重试');
@@ -182,6 +273,7 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
   }
 
   Future<void> _shareCard() async {
+    await _waitForExportImageReady();
     final bytes = await _captureCardPng();
     if (bytes == null) {
       if (mounted) ToastMessage.show(context, '分享失败，请重试');
@@ -198,6 +290,10 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
 
   void _onWantToSay() {
     context.push(AppRoutes.aiPetCopy, extra: _photo);
+  }
+
+  void _backToGallery() {
+    popToGallery(context);
   }
 
   Future<void> _showExportMenu() async {
@@ -241,7 +337,12 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _backToGallery();
+      },
+      child: Scaffold(
       backgroundColor: _pageBg,
       appBar: AppBar(
         backgroundColor: _pageBg,
@@ -257,7 +358,7 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => context.pop(),
+          onPressed: _backToGallery,
         ),
         actions: [
           IconButton(
@@ -280,6 +381,7 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
       body: _loading || _metadata == null
           ? _buildLoadingBody()
           : _buildBody(_metadata!),
+      ),
     );
   }
 
@@ -319,6 +421,24 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
     );
   }
 
+  Widget _buildPaletteCard({
+    required PhotoMetadata metadata,
+    required double width,
+  }) {
+    return PaletteExportCard(
+      key: ValueKey(
+        'palette-${_photo.id}:${_resolvedImageUrl ?? _displayLocalPath()}',
+      ),
+      localPath: _displayLocalPath(),
+      remoteUrl: _displayRemoteUrl(),
+      metadata: metadata,
+      bandColor: _bandColor,
+      width: width,
+      roundCorners: false,
+      onImageReady: _onExportCardImageReady,
+    );
+  }
+
   Widget _buildBody(PhotoMetadata metadata) {
     const horizontalInset = 16.0;
     final width = MediaQuery.sizeOf(context).width - horizontalInset * 2;
@@ -328,13 +448,9 @@ class _PhotoPaletteScreenState extends State<PhotoPaletteScreen> {
         padding: const EdgeInsets.symmetric(horizontal: horizontalInset, vertical: 24),
         child: RepaintBoundary(
           key: _exportKey,
-          child: PaletteExportCard(
-            localPath: _displayLocalPath(),
-            remoteUrl: _displayRemoteUrl(),
+          child: _buildPaletteCard(
             metadata: metadata,
-            bandColor: _bandColor,
             width: width,
-            roundCorners: !_exportSquareCorners,
           ),
         ),
       ),

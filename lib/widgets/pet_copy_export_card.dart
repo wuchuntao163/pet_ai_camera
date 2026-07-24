@@ -1,9 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
-import '../services/file_upload_service.dart';
 import '../services/pet_text_service.dart';
+import 'export_card_center_image.dart';
 import 'organic_bubble.dart';
 
 /// AI 趣味文案导出卡片（相框：内边距 + 原图完整显示 + 底色文案区）
@@ -16,6 +14,7 @@ class PetCopyExportCard extends StatefulWidget {
   final int bubbleSeed;
   final double width;
   final bool roundCorners;
+  final VoidCallback? onImageReady;
 
   const PetCopyExportCard({
     super.key,
@@ -27,6 +26,7 @@ class PetCopyExportCard extends StatefulWidget {
     this.bubbleSeed = 0,
     required this.width,
     this.roundCorners = true,
+    this.onImageReady,
   });
 
   @override
@@ -40,77 +40,29 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
   static const _fallbackAspectRatio = 3 / 4;
 
   double? _imageAspectRatio;
-  ImageStreamListener? _aspectListener;
-  ImageStream? _aspectStream;
-
-  @override
-  void initState() {
-    super.initState();
-    _resolveImageAspectRatio();
-  }
 
   @override
   void didUpdateWidget(covariant PetCopyExportCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.localPath != widget.localPath ||
         oldWidget.remoteUrl != widget.remoteUrl) {
-      _disposeAspectListener();
       _imageAspectRatio = null;
-      _resolveImageAspectRatio();
     }
   }
 
   @override
   void dispose() {
-    _disposeAspectListener();
     super.dispose();
   }
 
-  void _disposeAspectListener() {
-    if (_aspectListener != null && _aspectStream != null) {
-      _aspectStream!.removeListener(_aspectListener!);
-    }
-    _aspectListener = null;
-    _aspectStream = null;
+  void _onAspectRatioResolved(double ratio) {
+    if (!mounted || ratio <= 0) return;
+    if (_imageAspectRatio == ratio) return;
+    setState(() => _imageAspectRatio = ratio);
   }
 
-  void _resolveImageAspectRatio() {
-    ImageProvider? provider;
-    final localPath = widget.localPath?.trim();
-    if (localPath != null && localPath.isNotEmpty) {
-      final file = File(localPath);
-      if (file.existsSync()) {
-        provider = FileImage(file);
-      }
-    }
-    provider ??= _networkProvider(widget.remoteUrl);
-    if (provider == null) return;
-
-    final stream = provider.resolve(const ImageConfiguration());
-    _aspectStream = stream;
-    _aspectListener = ImageStreamListener(
-      (info, _) {
-        final width = info.image.width.toDouble();
-        final height = info.image.height.toDouble();
-        if (height <= 0 || !mounted) return;
-        setState(() => _imageAspectRatio = width / height);
-      },
-      onError: (_, __) {},
-    );
-    stream.addListener(_aspectListener!);
-  }
-
-  NetworkImage? _networkProvider(String? url) {
-    final value = _resolvedRemoteUrl(raw: url);
-    if (value == null || value.isEmpty) return null;
-    return NetworkImage(value);
-  }
-
-  String? _resolvedRemoteUrl({String? raw}) {
-    final value = (raw ?? widget.remoteUrl)?.trim();
-    if (value == null || value.isEmpty) return null;
-    if (value.startsWith('http')) return value;
-    return FileUploadService.resolveUrl(value);
+  void _onImageDisplayed() {
+    widget.onImageReady?.call();
   }
 
   @override
@@ -137,7 +89,16 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
                 child: SizedBox(
                   width: contentWidth,
                   height: imageHeight,
-                  child: _buildPhoto(contentWidth, imageHeight),
+                  child: ExportCardCenterImage(
+                    localPath: widget.localPath,
+                    remoteUrl: widget.remoteUrl,
+                    width: contentWidth,
+                    height: imageHeight,
+                    onAspectRatioResolved: _onAspectRatioResolved,
+                    onDisplayed: widget.onImageReady == null
+                        ? null
+                        : _onImageDisplayed,
+                  ),
                 ),
               ),
               Container(
@@ -182,54 +143,13 @@ class _PetCopyExportCardState extends State<PetCopyExportCard> {
 
   Widget _wrapCorners(Widget child) {
     if (!widget.roundCorners) return child;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: child,
-    );
-  }
-
-  Widget _buildPhoto(double photoWidth, double photoHeight) {
-    final localPath = widget.localPath?.trim();
-    if (localPath != null && localPath.isNotEmpty) {
-      final file = File(localPath);
-      if (file.existsSync()) {
-        return Image.file(
-          file,
-          width: photoWidth,
-          height: photoHeight,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) =>
-              _networkOrPlaceholder(photoWidth, photoHeight),
-        );
-      }
-    }
-    return _networkOrPlaceholder(photoWidth, photoHeight);
-  }
-
-  Widget _networkOrPlaceholder(double photoWidth, double photoHeight) {
-    final url = _resolvedRemoteUrl();
-    if (url != null && url.isNotEmpty) {
-      return Image.network(
-        url,
-        width: photoWidth,
-        height: photoHeight,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => _placeholder(photoWidth, photoHeight),
-      );
-    }
-    return _placeholder(photoWidth, photoHeight);
-  }
-
-  Widget _placeholder(double photoWidth, double photoHeight) {
-    return ColoredBox(
-      color: const Color(0xFF27272A),
-      child: Center(
-        child: Icon(
-          Icons.image_outlined,
-          size: photoWidth * 0.2,
-          color: Colors.white38,
-        ),
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: widget.textBackgroundColor,
+        borderRadius: BorderRadius.circular(8),
       ),
+      child: child,
     );
   }
 }

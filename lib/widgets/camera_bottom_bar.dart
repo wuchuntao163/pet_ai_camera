@@ -76,7 +76,7 @@ class CameraBottomBar extends StatelessWidget {
                 preferCloud: galleryThumbPreferCloud,
                 revision: lastPhotoRevision,
                 isLoading: isGalleryLoading,
-                onTap: isGalleryLoading ? null : onGallery,
+                onTap: onGallery,
               ),
               GestureDetector(
                 onTap: onShutter,

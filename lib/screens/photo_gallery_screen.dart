@@ -7,6 +7,7 @@ import '../constants/app_colors.dart';
 import '../constants/app_images.dart';
 import '../models/app_photo.dart';
 import '../router/app_routes.dart';
+import '../router/gallery_navigation.dart';
 import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
 import '../widgets/app_photo_image.dart';
@@ -38,13 +39,31 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
   }
 
   Future<void> _loadGallery() async {
+    final total = Stopwatch()..start();
+    final waitSw = Stopwatch()..start();
     await widget.galleryService.waitForPendingUploads();
+    waitSw.stop();
+    debugPrint(
+      '[GalleryLoad] waitForPendingUploads ${waitSw.elapsedMilliseconds}ms',
+    );
+
+    final refreshSw = Stopwatch()..start();
     await widget.galleryService.refreshFromServer();
+    refreshSw.stop();
+    debugPrint(
+      '[GalleryLoad] refreshFromServer ${refreshSw.elapsedMilliseconds}ms',
+    );
+
     if (!mounted) return;
     setState(() {
       _syncPhotos();
       _isLoading = false;
     });
+    total.stop();
+    debugPrint(
+      '[GalleryLoad] total ${total.elapsedMilliseconds}ms '
+      '(photos=${_photos.length})',
+    );
   }
 
   void _syncPhotos() {
@@ -427,7 +446,17 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_isBatchMode) {
+          _exitBatchMode();
+          return;
+        }
+        popGalleryToCamera(context);
+      },
+      child: Scaffold(
       backgroundColor: AppColors.cameraBg,
       appBar: AppBar(
         backgroundColor: AppColors.cameraBg,
@@ -441,7 +470,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
             if (_isBatchMode) {
               _exitBatchMode();
             } else {
-              context.pop();
+              popGalleryToCamera(context);
             }
           },
         ),
@@ -498,6 +527,7 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
               ),
             ),
         ],
+      ),
       ),
     );
   }

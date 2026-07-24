@@ -17,9 +17,9 @@ class CaptureLocationService {
   static const _sessionReuseMaxAge = Duration(minutes: 2);
   static const _peekMaxAge = Duration(seconds: 120);
   static const _lastKnownMaxAge = Duration(minutes: 3);
-  static const _maxAcceptableAccuracyMeters = 80.0;
-  static const _peekMaxAccuracyMeters = 150.0;
-  static const _waitForFixTimeout = Duration(seconds: 3);
+  static const _maxAcceptableAccuracyMeters = 100.0;
+  static const _peekMaxAccuracyMeters = 200.0;
+  static const _waitForFixTimeout = Duration(seconds: 2);
 
   StreamSubscription<Position>? _subscription;
   Position? _cached;
@@ -118,28 +118,28 @@ class CaptureLocationService {
   LocationSettings get _trackingSettings {
     if (Platform.isAndroid) {
       return AndroidSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 3,
-        intervalDuration: const Duration(seconds: 2),
+        accuracy: LocationAccuracy.medium,
+        distanceFilter: 10,
+        intervalDuration: const Duration(seconds: 3),
       );
     }
     return const LocationSettings(
-      accuracy: LocationAccuracy.best,
-      distanceFilter: 3,
+      accuracy: LocationAccuracy.medium,
+      distanceFilter: 10,
     );
   }
 
   LocationSettings get _captureFixSettings {
     if (Platform.isAndroid) {
       return AndroidSettings(
-        accuracy: LocationAccuracy.best,
+        accuracy: LocationAccuracy.medium,
         distanceFilter: 0,
-        timeLimit: const Duration(seconds: 8),
+        timeLimit: const Duration(seconds: 3),
       );
     }
     return const LocationSettings(
-      accuracy: LocationAccuracy.best,
-      timeLimit: Duration(seconds: 8),
+      accuracy: LocationAccuracy.medium,
+      timeLimit: Duration(seconds: 3),
     );
   }
 
@@ -172,7 +172,8 @@ class CaptureLocationService {
     _deferredExifPaths.clear();
     final stamped = <({String path, double lat, double lng})>[];
     for (final path in paths) {
-      final coords = await enqueueStampCaptureMetadata(path, preferFast: false);
+      // 用缓存坐标快速落 EXIF，避免进相册时再等高精度定位
+      final coords = await enqueueStampCaptureMetadata(path, preferFast: true);
       if (coords != null) {
         stamped.add((path: path, lat: coords.lat, lng: coords.lng));
       }

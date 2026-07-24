@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -5,7 +6,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -13,6 +13,7 @@ import '../api/api.dart';
 import '../constants/app_colors.dart';
 import '../constants/app_images.dart';
 import '../models/app_photo.dart';
+import '../router/gallery_navigation.dart';
 import '../services/pet_text_service.dart';
 import '../services/photo_gallery_service.dart';
 import '../services/photo_share_service.dart';
@@ -45,7 +46,12 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
 
   bool _loading = true;
   bool _regenerating = false;
-  bool _exportSquareCorners = false;
+  bool _saving = false;
+  bool _autoUploading = false;
+  bool _autoUploadDone = false;
+  bool _cardImageReady = false;
+  int _autoUploadToken = 0;
+  Completer<void>? _exportImageReadyCompleter;
   String? _errorMessage;
   PetTextResult? _result;
   String? _resolvedImageUrl;
@@ -64,6 +70,10 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
   }
 
   Future<void> _generate() async {
+    _autoUploadToken++;
+    _autoUploadDone = false;
+    _cardImageReady = false;
+    _resetExportImageWaiter();
     setState(() {
       _loading = true;
       _errorMessage = null;
@@ -84,6 +94,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
         _regenerating = false;
       });
       _textController.text = response.result.text;
+      unawaited(_runAutoUploadFlow(_autoUploadToken));
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -109,23 +120,104 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
     await _generate();
   }
 
-  Future<Uint8List?> _captureCardPng() async {
-    setState(() => _exportSquareCorners = true);
+  void _resetExportImageWaiter() {
+    _exportImageReadyCompleter = Completer<void>();
+  }
+
+  Future<void> _waitForExportImageReady() async {
+    final waiter = _exportImageReadyCompleter;
+    if (waiter != null && !waiter.isCompleted) {
+      try {
+        await waiter.future.timeout(const Duration(seconds: 20));
+      } catch (_) {}
+    }
     await WidgetsBinding.instance.endOfFrame;
-    await Future.delayed(const Duration(milliseconds: 100));
+  }
+
+  void _markExportImageReady() {
+    _cardImageReady = true;
+    final waiter = _exportImageReadyCompleter;
+    if (waiter != null && !waiter.isCompleted) {
+      waiter.complete();
+    }
+  }
+
+  void _onExportCardImageReady() {
+    _markExportImageReady();
+    if (!mounted || _loading || _result == null || _autoUploadDone) return;
+    unawaited(_autoUploadToAppGallery(_autoUploadToken));
+  }
+
+  Future<void> _runAutoUploadFlow(int token) async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted || token != _autoUploadToken || _autoUploadDone) return;
+
+    for (var i = 0; i < 200; i++) {
+      if (!mounted || token != _autoUploadToken || _autoUploadDone) return;
+      if (_loading || _result == null) {
+        await Future.delayed(const Duration(milliseconds: 20));
+        continue;
+      }
+      if (_cardImageReady) {
+        await _autoUploadToAppGallery(token);
+        return;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      await Future.delayed(const Duration(milliseconds: 20));
+    }
+
+    if (mounted && token == _autoUploadToken && !_autoUploadDone) {
+      await _autoUploadToAppGallery(token);
+    }
+  }
+
+  Future<void> _autoUploadToAppGallery(int token) async {
+    if (_autoUploadDone || token != _autoUploadToken) return;
+    if (_autoUploading || _loading || _result == null || !mounted) return;
+    _autoUploading = true;
     try {
+      await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
+      if (token != _autoUploadToken || !mounted || _result == null) return;
+
+      final bytes = await _captureCardPng();
+      if (bytes == null) return;
+      final path = await _writeTempPng(bytes);
+      if (path == null) return;
+
+      final stored = await widget.galleryService.captureCoordinatesFor(
+        widget.photo,
+      );
+      await widget.galleryService.saveExportedCard(
+        sourcePath: path,
+        captureLatitude: stored?.lat ?? widget.photo.captureLatitude,
+        captureLongitude: stored?.lng ?? widget.photo.captureLongitude,
+      );
+      _autoUploadDone = true;
+    } catch (e, stack) {
+      debugPrint('AiPetCopyScreen: auto upload failed: $e\n$stack');
+    } finally {
+      _autoUploading = false;
+    }
+  }
+
+  Future<Uint8List?> _captureCardPng() async {
+    for (var attempt = 0; attempt < 20; attempt++) {
+      await WidgetsBinding.instance.endOfFrame;
       final boundary = _exportKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
-      if (boundary == null) return null;
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
-      return byteData?.buffer.asUint8List();
-    } finally {
-      if (mounted) {
-        setState(() => _exportSquareCorners = false);
+      if (boundary != null) {
+        try {
+          final image = await boundary.toImage(pixelRatio: 3.0);
+          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+          image.dispose();
+          final bytes = byteData?.buffer.asUint8List();
+          if (bytes != null && bytes.isNotEmpty) return bytes;
+        } catch (_) {}
       }
+      await Future.delayed(const Duration(milliseconds: 32));
     }
+    return null;
   }
 
   String? _displayLocalPath() {
@@ -146,6 +238,23 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
     return FileUploadService.resolveUrl(value);
   }
 
+  Widget _buildExportCard({
+    required PetTextResult result,
+    required double width,
+  }) {
+    return PetCopyExportCard(
+      key: ValueKey(_bubbleSeed),
+      localPath: _displayLocalPath(),
+      remoteUrl: _displayRemoteUrl(),
+      text: _textController.text,
+      textBackgroundColor: result.backgroundColor,
+      bubbleSeed: _bubbleSeed,
+      width: width,
+      roundCorners: false,
+      onImageReady: _onExportCardImageReady,
+    );
+  }
+
   Future<String?> _writeTempPng(Uint8List bytes) async {
     final dir = await getTemporaryDirectory();
     final path =
@@ -155,6 +264,8 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
   }
 
   Future<void> _saveToGallery() async {
+    if (_saving) return;
+    await _waitForExportImageReady();
     final bytes = await _captureCardPng();
     if (bytes == null) {
       if (mounted) ToastMessage.show(context, '保存失败，请重试');
@@ -167,21 +278,27 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
       return;
     }
 
+    _saving = true;
     try {
       final path = await _writeTempPng(bytes);
       if (path == null) throw StateError('temp file');
+
       await PhotoManager.editor.saveImageWithPath(
         path,
         title: 'pet_ai_copy_${DateTime.now().millisecondsSinceEpoch}',
         relativePath: 'Pictures/PetAiCamera',
       );
+
       if (mounted) ToastMessage.show(context, '已保存到相册');
     } catch (_) {
       if (mounted) ToastMessage.show(context, '保存失败，请重试');
+    } finally {
+      _saving = false;
     }
   }
 
   Future<void> _shareCard() async {
+    await _waitForExportImageReady();
     final bytes = await _captureCardPng();
     if (bytes == null) {
       if (mounted) ToastMessage.show(context, '分享失败，请重试');
@@ -200,9 +317,18 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
+  void _backToGallery() {
+    popToGallery(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _backToGallery();
+      },
+      child: Scaffold(
       backgroundColor: _pageBg,
       appBar: AppBar(
         backgroundColor: _pageBg,
@@ -218,7 +344,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => context.pop(),
+          onPressed: _backToGallery,
         ),
       ),
       body: _loading && _result == null
@@ -226,6 +352,7 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
           : _errorMessage != null && _result == null
               ? _buildErrorBody()
               : _buildResultBody(),
+    ),
     );
   }
 
@@ -327,14 +454,9 @@ class _AiPetCopyScreenState extends State<AiPetCopyScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: contentInset),
                       child: RepaintBoundary(
                         key: _exportKey,
-                        child: PetCopyExportCard(
-                          localPath: _displayLocalPath(),
-                          remoteUrl: _displayRemoteUrl(),
-                          text: _textController.text,
-                          textBackgroundColor: result.backgroundColor,
-                          bubbleSeed: _bubbleSeed,
+                        child: _buildExportCard(
+                          result: result,
                           width: contentWidth,
-                          roundCorners: !_exportSquareCorners,
                         ),
                       ),
                     ),
